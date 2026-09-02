@@ -56,7 +56,7 @@ export default async function handler(req, res) {
     if (hr.available && hr.rows.length) {
       source = `${hr.table} (your employee table)`;
       people = hr.rows;
-      sourceNote = `Read ${hr.total} rows; ${hr.rows.length} had a usable email address.`;
+      sourceNote = `Read ${hr.total} rows from ${hr.table}; ${hr.rows.length} were given a sign-in.`;
     } else {
       const roster = readRoster();
       people = roster.people;
@@ -84,8 +84,11 @@ export default async function handler(req, res) {
       source,
       sourceNote,
       hrDetectedColumns: hr.mapping,
-      skippedFromHr: (hr.skipped || []).length,
-      skippedExamples: (hr.skipped || []).slice(0, 5),
+      accessRule: hr.accessRule,
+      noEmail: (hr.skipped || []).length,
+      noEmailExamples: (hr.skipped || []).slice(0, 5),
+      excludedByAccessRule: (hr.excluded || []).length,
+      excludedExamples: (hr.excluded || []).slice(0, 8),
       seeded: seeded.length,
       activeEmployees: directory.length,
       conflicts,
