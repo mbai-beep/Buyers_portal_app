@@ -11,6 +11,7 @@ import path from 'node:path';
 import { getSession } from '../lib/session.js';
 
 const USER_SLOT = '/*MB_USER*/null/*MB_USER*/';
+const DATA_SLOT = '/*MB_DATA*/null/*MB_DATA*/';
 let template = null;
 
 async function load() {
@@ -50,7 +51,19 @@ export default async function handler(req, res) {
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.setHeader('Cache-Control', 'private, no-store, max-age=0');
     res.setHeader('X-Frame-Options', 'SAMEORIGIN');
-    return res.end(html.replace(USER_SLOT, JSON.stringify(user).replace(/</g, '\\u003c')));
+
+    // Until the screens read zRetailHQ0, they run on the figures baked into
+    // the SPA. The page says so, and it says so because of this, not because
+    // someone remembered to leave a note in the markup.
+    const data = {
+      source: process.env.DATA_SOURCE === 'live' ? 'live' : 'demo',
+      note: process.env.DATA_SOURCE_NOTE || '',
+    };
+
+    const json = (v) => JSON.stringify(v).replace(/</g, '\\u003c');
+    return res.end(
+      html.replace(USER_SLOT, json(user)).replace(DATA_SLOT, json(data))
+    );
   } catch (err) {
     console.error('portal serve failed', err);
     res.statusCode = 500;
