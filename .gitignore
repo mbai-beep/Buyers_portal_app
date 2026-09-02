@@ -1,0 +1,16 @@
+node_modules/
+.vercel/
+.env
+.env.local
+.env.*.local
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+local.db
+data/
+npm-debug.log*
+.DS_Store
+Thumbs.db
+docs/schema-dump*.txt
+docs/schema-dump*.json

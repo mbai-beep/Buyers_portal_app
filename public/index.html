@@ -1,0 +1,402 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Sign in &middot; Meena Bazaar Buyer's Portal</title>
+<meta name="description" content="Meena Bazaar Buyer's Portal - sign in with your official email address.">
+<meta name="robots" content="noindex,nofollow">
+<meta name="theme-color" content="#f4f4f1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0f110e" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="/meena_bazaar_logo.png">
+<link rel="apple-touch-icon" href="/meena_bazaar_logo.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,300;0,6..72,400;0,6..72,500;1,6..72,300&family=Public+Sans:wght@300;400;500;600;700&display=swap">
+<style>
+/* Tokens lifted from the portal's "meena" skin so the two screens are one product. */
+:root{
+  color-scheme: light;
+  --paper:#f4f4f1; --card:#ffffff; --shell:#f7f7f4;
+  --line:#e7e7e1; --line2:#ecebe5;
+  --ink:#141613; --ink2:#41453f; --mute:#787c74;
+  --seal:#24271f; --sealink:#f4f4f1;
+  --accent:#7e1f2a; --accentsoft:#f6e7e8;
+  --ok:#0e6b63; --oksoft:#e4efed;
+  --sans:"Public Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  --serif:"Newsreader",Georgia,serif;
+  --r:16px;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    color-scheme: dark;
+    --paper:#0f110e; --card:#181b17; --shell:#1f231d;
+    --line:#282d25; --line2:#22261f;
+    --ink:#eff1eb; --ink2:#c4c8bd; --mute:#8f948a;
+    --seal:#cbe6a5; --sealink:#151a10;
+    --accent:#e0748b; --accentsoft:#2c1a1d;
+    --ok:#46b584; --oksoft:#12261f;
+  }
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;height:100%}
+body{
+  font:400 14px/1.5 var(--sans);
+  background:var(--paper); color:var(--ink);
+  -webkit-font-smoothing:antialiased;
+  display:flex; flex-direction:column; min-height:100dvh;
+}
+[hidden]{display:none!important}
+
+/* ---------------------------------------------------------------- layout */
+.wrap{flex:1;display:flex;align-items:center;justify-content:center;padding:28px 18px 12px}
+.sheet{width:100%;max-width:392px}
+
+/* ---------------------------------------------------------------- brand */
+.brand{text-align:center;margin:0 0 26px}
+/* The Meena Bazaar mark is black ink on transparent, so it keeps a light
+   plate in both themes - on the dark ground it would otherwise vanish. */
+.mark{
+  width:158px;height:70px;margin:0 auto 18px;
+  display:flex;align-items:center;justify-content:center;
+  background:#fdfdfb;border:1px solid var(--line);
+  border-radius:16px;box-shadow:0 1px 2px rgba(20,22,19,.06);
+  overflow:hidden;
+}
+@media (prefers-color-scheme: dark){ .mark{border-color:#33392e} }
+.mark img{width:124px;height:auto;display:block}
+.wordmark{
+  font:600 27px/1 var(--sans); letter-spacing:.16em;
+  color:var(--ink); margin:0 0 7px; text-transform:uppercase;
+}
+.wordmark span{color:var(--mute);font-weight:400}
+.house{
+  font:300 17px/1.25 var(--serif); font-style:italic;
+  color:var(--ink2); margin:0 0 10px;
+}
+.rule{width:34px;height:1px;background:var(--line);margin:0 auto 11px}
+.appname{
+  font:500 11px/1 var(--sans); letter-spacing:.13em; text-transform:uppercase;
+  color:var(--mute); margin:0;
+}
+
+/* ---------------------------------------------------------------- card */
+.card{
+  background:var(--card); border:1px solid var(--line);
+  border-radius:var(--r); padding:22px 20px 20px;
+  box-shadow:0 1px 2px rgba(20,22,19,.04), 0 8px 24px -18px rgba(20,22,19,.22);
+}
+.card h1{font:600 16px/1.3 var(--sans);margin:0 0 3px;color:var(--ink)}
+.card .lede{font:400 12.5px/1.45 var(--sans);color:var(--mute);margin:0 0 18px}
+
+.field{margin:0 0 14px}
+.field label{display:block;font:600 11.5px/1 var(--sans);letter-spacing:.05em;
+  text-transform:uppercase;color:var(--ink2);margin:0 0 6px}
+.inputrow{position:relative;display:flex}
+input[type=email],input[type=password],input[type=text]{
+  width:100%; font:400 14.5px/1 var(--sans); color:var(--ink);
+  background:var(--shell); border:1px solid var(--line);
+  border-radius:11px; padding:12px 13px; -webkit-appearance:none; appearance:none;
+  transition:border-color .12s, box-shadow .12s, background .12s;
+}
+input:focus{
+  outline:none; border-color:var(--seal); background:var(--card);
+  box-shadow:0 0 0 3px color-mix(in srgb, var(--seal) 14%, transparent);
+}
+input:disabled{opacity:.6}
+input[aria-invalid=true]{border-color:var(--accent)}
+.peek{
+  position:absolute; right:4px; top:4px; bottom:4px; padding:0 11px;
+  font:600 11px/1 var(--sans); letter-spacing:.06em; text-transform:uppercase;
+  color:var(--mute); background:transparent; border:0; border-radius:8px; cursor:pointer;
+}
+.peek:hover{color:var(--ink);background:var(--line2)}
+.hint{display:block;font:400 11.5px/1.4 var(--sans);color:var(--mute);margin:6px 0 0}
+
+button.go{
+  width:100%; margin-top:6px; font:600 14px/1 var(--sans);
+  color:var(--sealink); background:var(--seal);
+  border:0; border-radius:999px; padding:14px; cursor:pointer;
+  transition:opacity .12s, transform .06s;
+}
+button.go:hover{opacity:.9}
+button.go:active{transform:translateY(1px)}
+button.go[disabled]{opacity:.55;cursor:default;transform:none}
+
+.msg{
+  font:400 12.5px/1.45 var(--sans); border-radius:10px;
+  padding:10px 12px; margin:0 0 15px; border:1px solid transparent;
+}
+.msg.bad{color:var(--accent);background:var(--accentsoft);border-color:color-mix(in srgb, var(--accent) 22%, transparent)}
+.msg.good{color:var(--ok);background:var(--oksoft);border-color:color-mix(in srgb, var(--ok) 22%, transparent)}
+
+.foot{
+  text-align:center; padding:14px 18px 24px;
+  font:400 11.5px/1.5 var(--sans); color:var(--mute);
+}
+.foot b{font-weight:600;color:var(--ink2)}
+.spin{
+  display:inline-block;width:12px;height:12px;margin-right:7px;vertical-align:-1px;
+  border:2px solid color-mix(in srgb, var(--sealink) 35%, transparent);
+  border-top-color:var(--sealink); border-radius:50%;
+  animation:sp .6s linear infinite;
+}
+@keyframes sp{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.spin{animation-duration:2s}}
+@media (max-width:380px){ .wrap{padding:18px 14px 10px} .card{padding:18px 16px 16px} }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <main class="sheet">
+
+    <div class="brand">
+      <div class="mark"><img src="/meena_bazaar_logo.png" alt="Meena Bazaar"></div>
+      <p class="wordmark">MBZ<span>.IN</span></p>
+      <p class="house">Meena&nbsp;Bazaar</p>
+      <div class="rule"></div>
+      <p class="appname">The Buyer&rsquo;s Portal</p>
+    </div>
+
+    <!-- ------------------------------------------------------ sign in -->
+    <section class="card" id="signinCard">
+      <h1>Sign in</h1>
+      <p class="lede">Use your official Meena Bazaar email address.</p>
+
+      <div class="msg" id="notice" role="status" aria-live="polite" hidden></div>
+
+      <form id="signinForm" novalidate>
+        <div class="field">
+          <label for="email">Email address</label>
+          <div class="inputrow">
+            <input id="email" name="email" type="email" autocomplete="username"
+                   inputmode="email" spellcheck="false" autocapitalize="none"
+                   placeholder="name@mbindia.net" required>
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="password">Password</label>
+          <div class="inputrow">
+            <input id="password" name="password" type="password"
+                   autocomplete="current-password" required>
+            <button type="button" class="peek" id="peek"
+                    aria-label="Show password" aria-pressed="false">Show</button>
+          </div>
+          <span class="hint">First time in? Your password is <b>MBZ</b> followed by your
+            email address &mdash; you&rsquo;ll be asked to change it.</span>
+        </div>
+
+        <button class="go" type="submit" id="signinBtn">Sign in</button>
+      </form>
+    </section>
+
+    <!-- --------------------------------------------- set a new password -->
+    <section class="card" id="changeCard" hidden>
+      <h1>Choose a password</h1>
+      <p class="lede" id="changeLede">You&rsquo;re signed in on the password that was issued to
+        you. Set your own before you carry on.</p>
+
+      <div class="msg" id="changeNotice" role="status" aria-live="polite" hidden></div>
+
+      <form id="changeForm" novalidate>
+        <div class="field">
+          <label for="newPassword">New password</label>
+          <div class="inputrow">
+            <input id="newPassword" type="password" autocomplete="new-password" required>
+            <button type="button" class="peek" id="peek2"
+                    aria-label="Show password" aria-pressed="false">Show</button>
+          </div>
+          <span class="hint">At least 10 characters, with a letter and a number.</span>
+        </div>
+
+        <div class="field">
+          <label for="confirmPassword">Confirm new password</label>
+          <div class="inputrow">
+            <input id="confirmPassword" type="password" autocomplete="new-password" required>
+          </div>
+        </div>
+
+        <button class="go" type="submit" id="changeBtn">Save and open the portal</button>
+      </form>
+    </section>
+
+  </main>
+</div>
+
+<p class="foot"><b>Meena Bazaar</b> &middot; Buying &amp; Merchandising<br>
+  Trouble signing in? Ask IT at mbai@mbindia.net</p>
+
+<script>
+(function () {
+  'use strict';
+
+  var params = new URLSearchParams(location.search);
+  var nextUrl = safeNext(params.get('next')) || '/portal';
+
+  var els = {
+    signinCard: byId('signinCard'), changeCard: byId('changeCard'),
+    signinForm: byId('signinForm'), changeForm: byId('changeForm'),
+    email: byId('email'), password: byId('password'),
+    newPassword: byId('newPassword'), confirmPassword: byId('confirmPassword'),
+    signinBtn: byId('signinBtn'), changeBtn: byId('changeBtn'),
+    notice: byId('notice'), changeNotice: byId('changeNotice'),
+    changeLede: byId('changeLede')
+  };
+
+  var issuedPassword = null;   // held only long enough to authorise the change
+
+  function byId(id) { return document.getElementById(id); }
+
+  /* Only ever bounce to a same-origin path, never to an absolute URL. */
+  function safeNext(v) {
+    if (!v) return null;
+    if (v.charAt(0) !== '/' || v.charAt(1) === '/') return null;
+    return v;
+  }
+
+  function show(el, kind, text) {
+    if (!text) { el.hidden = true; el.textContent = ''; return; }
+    el.hidden = false;
+    el.className = 'msg ' + kind;
+    el.textContent = text;
+  }
+
+  function busy(btn, on, label) {
+    btn.disabled = on;
+    btn.innerHTML = on ? '<span class="spin"></span>' + label : label;
+  }
+
+  function post(url, body) {
+    return fetch(url, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    }).then(function (r) {
+      return r.json().catch(function () { return {}; })
+        .then(function (data) { return { status: r.status, data: data }; });
+    });
+  }
+
+  /* --------------------------------------------------------- show/hide */
+  function wirePeek(btnId, input) {
+    var btn = byId(btnId);
+    btn.addEventListener('click', function () {
+      var showing = input.type === 'text';
+      input.type = showing ? 'password' : 'text';
+      btn.textContent = showing ? 'Show' : 'Hide';
+      btn.setAttribute('aria-pressed', String(!showing));
+      btn.setAttribute('aria-label', showing ? 'Show password' : 'Hide password');
+      input.focus();
+    });
+  }
+  wirePeek('peek', els.password);
+  wirePeek('peek2', els.newPassword);
+
+  /* ------------------------------------------------------ arrival state */
+  if (params.get('signedout')) show(els.notice, 'good', 'You have been signed out.');
+  else if (params.get('next')) show(els.notice, 'bad', 'Please sign in to open the portal.');
+
+  try {
+    var last = localStorage.getItem('mbz.lastEmail');
+    if (last) { els.email.value = last; els.password.focus(); } else { els.email.focus(); }
+  } catch (e) { els.email.focus(); }
+
+  /* ------------------------------------------------------------ sign in */
+  els.signinForm.addEventListener('submit', function (ev) {
+    ev.preventDefault();
+    show(els.notice, '', '');
+
+    var email = els.email.value.trim().toLowerCase();
+    var password = els.password.value;
+
+    els.email.setAttribute('aria-invalid', 'false');
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) {
+      els.email.setAttribute('aria-invalid', 'true');
+      show(els.notice, 'bad', 'Enter your full email address.');
+      els.email.focus();
+      return;
+    }
+    if (!password) {
+      show(els.notice, 'bad', 'Enter your password.');
+      els.password.focus();
+      return;
+    }
+
+    busy(els.signinBtn, true, 'Signing in…');
+
+    post('/api/auth/login', { email: email, password: password })
+      .then(function (res) {
+        if (res.status !== 200 || !res.data.ok) {
+          busy(els.signinBtn, false, 'Sign in');
+          show(els.notice, 'bad', res.data.message || 'Could not sign you in. Try again.');
+          els.password.select();
+          return;
+        }
+
+        try { localStorage.setItem('mbz.lastEmail', email); } catch (e) {}
+
+        if (res.data.mustChangePassword) {
+          issuedPassword = password;
+          els.password.value = '';
+          els.signinCard.hidden = true;
+          els.changeCard.hidden = false;
+          var who = res.data.user && res.data.user.name ? res.data.user.name.split(' ')[0] : null;
+          if (who) {
+            els.changeLede.textContent = 'Welcome, ' + who +
+              '. You are on the password that was issued to you — set your own before you carry on.';
+          }
+          els.newPassword.focus();
+          return;
+        }
+
+        location.href = res.data.next || nextUrl;
+      })
+      .catch(function () {
+        busy(els.signinBtn, false, 'Sign in');
+        show(els.notice, 'bad', 'No response from the server. Check your connection and try again.');
+      });
+  });
+
+  /* -------------------------------------------------- set new password */
+  els.changeForm.addEventListener('submit', function (ev) {
+    ev.preventDefault();
+    show(els.changeNotice, '', '');
+
+    var pw = els.newPassword.value;
+    var confirm = els.confirmPassword.value;
+
+    if (pw.length < 10 || !/[A-Za-z]/.test(pw) || !/[0-9]/.test(pw)) {
+      show(els.changeNotice, 'bad', 'Use at least 10 characters, including a letter and a number.');
+      els.newPassword.focus();
+      return;
+    }
+    if (pw !== confirm) {
+      show(els.changeNotice, 'bad', 'The two passwords do not match.');
+      els.confirmPassword.select();
+      return;
+    }
+
+    busy(els.changeBtn, true, 'Saving…');
+
+    post('/api/auth/change-password', { currentPassword: issuedPassword, newPassword: pw })
+      .then(function (res) {
+        if (res.status !== 200 || !res.data.ok) {
+          busy(els.changeBtn, false, 'Save and open the portal');
+          show(els.changeNotice, 'bad', res.data.message || 'Could not save that password. Try again.');
+          return;
+        }
+        issuedPassword = null;
+        location.href = nextUrl;
+      })
+      .catch(function () {
+        busy(els.changeBtn, false, 'Save and open the portal');
+        show(els.changeNotice, 'bad', 'No response from the server. Try again.');
+      });
+  });
+})();
+</script>
+</body>
+</html>
