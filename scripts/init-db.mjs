@@ -11,7 +11,13 @@ if (!url) {
   process.exit(1);
 }
 
-await initSchema();
+const applied = await initSchema();
+if (applied.length) {
+  console.log('Applied:');
+  for (const change of applied) console.log(`  ${change}`);
+} else {
+  console.log('Schema already current.');
+}
 const { rows } = await db().execute(
   "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
 );

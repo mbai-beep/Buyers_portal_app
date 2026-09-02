@@ -38,7 +38,9 @@ export default async function handler(req, res) {
   }
 
   try {
-    await initSchema();
+    // Retrofits a directory created by hand or by an older version, rather
+    // than silently leaving it short of columns the app needs.
+    const migrations = await initSchema();
 
     const { people, conflicts } = readRoster();
     const seeded = [];
@@ -50,7 +52,8 @@ export default async function handler(req, res) {
     const directory = await listEmployees();
     return json(res, 200, {
       ok: true,
-      schema: 'ready',
+      schema: migrations.length ? 'migrated' : 'already current',
+      migrations,
       seeded: seeded.length,
       activeEmployees: directory.length,
       conflicts,
