@@ -4,6 +4,9 @@ import { hashPassword, verifyPassword, matchesDefault, defaultPasswordFor } from
 import {
   findByEmail, setPasswordHash, touchLogin, audit, recentFailures, publicView,
 } from '../../lib/employees.js';
+import {
+  sessionSecretProblem, directoryConfigProblem, classifyDirectoryError, redact,
+} from '../../lib/config.js';
 
 const MAX_FAILURES = 8;
 
@@ -24,6 +27,24 @@ export default async function handler(req, res) {
   }
   if (!isEmail(email)) {
     return json(res, 400, { error: 'bad_email', message: 'That does not look like an email address.' });
+  }
+
+  // Checked up front, and reported separately from a directory failure: a
+  // missing SESSION_SECRET and an unreachable Turso are different problems and
+  // used to produce the same unhelpful message.
+  for (const [reason, problem] of [
+    ['session_secret', sessionSecretProblem()],
+    ['directory_config', directoryConfigProblem()],
+  ]) {
+    if (!problem) continue;
+    console.error(`login blocked: ${problem}`);
+    return json(res, 500, {
+      error: 'server_misconfigured',
+      reason,
+      message: 'This deployment is missing a setting, so nobody can sign in yet. ' +
+               'Open /api/health for the detail.',
+      detail: problem,
+    });
   }
 
   try {
@@ -84,10 +105,14 @@ export default async function handler(req, res) {
 
     return json(res, 200, { ok: true, user, mustChangePassword: user.mustChangePassword, next: '/portal' });
   } catch (err) {
-    console.error('login failed', err);
-    return json(res, 500, {
-      error: 'server_error',
-      message: 'Could not reach the employee directory. Try again in a moment.',
+    const { reason, hint } = classifyDirectoryError(err);
+    console.error(`login failed [${reason}]`, redact(err?.stack || err?.message || err));
+    return json(res, 503, {
+      error: 'directory_unavailable',
+      reason,
+      message: 'Could not reach the employee directory.',
+      detail: hint,
+      check: '/api/health',
     });
   }
 }
