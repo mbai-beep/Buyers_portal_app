@@ -10,26 +10,54 @@
       "includeFiles": "assets/**",
       "maxDuration": 60,
       "memory": 1024
+    },
+    "api/admin/diagnose.js": {
+      "maxDuration": 60,
+      "memory": 1024
+    },
+    "api/admin/inspect.js": {
+      "maxDuration": 30
     }
   },
   "rewrites": [
-    { "source": "/login", "destination": "/index.html" },
-    { "source": "/portal", "destination": "/api/portal" }
+    {
+      "source": "/login",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/portal",
+      "destination": "/api/portal"
+    }
   ],
   "headers": [
     {
       "source": "/(.*)",
       "headers": [
-        { "key": "X-Content-Type-Options", "value": "nosniff" },
-        { "key": "X-Frame-Options", "value": "SAMEORIGIN" },
-        { "key": "Referrer-Policy", "value": "same-origin" },
-        { "key": "Permissions-Policy", "value": "geolocation=(), camera=()" }
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "X-Frame-Options",
+          "value": "SAMEORIGIN"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "same-origin"
+        },
+        {
+          "key": "Permissions-Policy",
+          "value": "geolocation=(), camera=()"
+        }
       ]
     },
     {
       "source": "/api/(.*)",
       "headers": [
-        { "key": "Cache-Control", "value": "no-store, max-age=0" }
+        {
+          "key": "Cache-Control",
+          "value": "no-store, max-age=0"
+        }
       ]
     }
   ]

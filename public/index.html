@@ -331,8 +331,14 @@ button.go[disabled]{opacity:.55;cursor:default;transform:none}
       .then(function (res) {
         if (res.status !== 200 || !res.data.ok) {
           busy(els.signinBtn, false, 'Sign in');
-          show(els.notice, 'bad', res.data.message || 'Could not sign you in. Try again.');
-          els.password.select();
+          // A server-side problem is not the person's fault and not something
+          // they can fix by retyping, so say what it actually is instead of
+          // leaving them to guess.
+          var msg = res.data.message || 'Could not sign you in. Try again.';
+          if (res.data.detail) msg += ' — ' + res.data.detail;
+          if (res.data.reason) msg += ' [' + res.data.reason + ']';
+          show(els.notice, 'bad', msg);
+          if (res.status === 401) els.password.select();
           return;
         }
 

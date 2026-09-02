@@ -14,7 +14,8 @@
     "test": "node --test test/*.test.mjs",
     "sql:check": "node scripts/check-sqlserver.mjs",
     "check:secrets": "node scripts/check-secrets.mjs --all",
-    "hooks": "node scripts/install-hooks.mjs"
+    "hooks": "node scripts/install-hooks.mjs",
+    "sql:views": "node scripts/describe-views.mjs"
   },
   "dependencies": {
     "@libsql/client": "^0.15.7",
