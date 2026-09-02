@@ -34,10 +34,30 @@ git push -u origin main
 | `SQLSERVER_TRUST_SERVER_CERTIFICATE` | `true` | the host presents a self-signed certificate |
 | `PORTAL_ADMIN_EMAILS` | `mbai@mbindia.net` | comma separated |
 | `SESSION_HOURS` | `8` | optional |
+| `BOOTSTRAP_TOKEN` | a random string | **temporary** — see step 4, then delete it |
 
 ## 4. Seeding the directory
 
-Run once from your machine, pointed at the production Turso database:
+The tables and the roster have to be created once. Two ways, depending on
+whether your network can reach Turso.
+
+### From the deployment (works anywhere)
+
+Set `BOOTSTRAP_TOKEN` in Vercel, deploy, then call it once:
+
+```bash
+curl -X POST https://<your-app>.vercel.app/api/admin/bootstrap \
+     -H "x-bootstrap-token: <the same value>"
+```
+
+It creates the tables, seeds the roster read out of the SPA, and reports what
+it did. Then **delete `BOOTSTRAP_TOKEN` from the environment and redeploy** —
+without it the endpoint returns 404 to everyone. It never overwrites a password
+that has already been set, so re-running it is safe.
+
+### From your own machine
+
+Only if your network can reach `*.turso.io` — a corporate proxy often cannot:
 
 ```bash
 cp .env.example .env.local     # fill in TURSO_* and SESSION_SECRET
@@ -46,9 +66,9 @@ npm run db:seed -- --dry-run   # check the list first
 npm run db:seed
 ```
 
-Everyone then signs in the first time with `MBZ` + their email address,
-e.g. `MBZchetna@mbindia.net`, and is made to set a real password before the
-portal opens.
+Either way, everyone then signs in the first time with `MBZ` + their email
+address, e.g. `MBZchetna@mbindia.net`, and is made to set a real password
+before the portal opens.
 
 ## 5. Checks after deploy
 

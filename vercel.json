@@ -5,6 +5,11 @@
       "includeFiles": "assets/**",
       "maxDuration": 20,
       "memory": 1024
+    },
+    "api/admin/bootstrap.js": {
+      "includeFiles": "assets/**",
+      "maxDuration": 60,
+      "memory": 1024
     }
   },
   "rewrites": [
