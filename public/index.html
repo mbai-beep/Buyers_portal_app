@@ -57,24 +57,15 @@ body{
 /* The Meena Bazaar mark is black ink on transparent, so it keeps a light
    plate in both themes - on the dark ground it would otherwise vanish. */
 .mark{
-  width:158px;height:70px;margin:0 auto 18px;
+  width:190px;height:84px;margin:0 auto 16px;
   display:flex;align-items:center;justify-content:center;
   background:#fdfdfb;border:1px solid var(--line);
-  border-radius:16px;box-shadow:0 1px 2px rgba(20,22,19,.06);
+  border-radius:18px;box-shadow:0 1px 2px rgba(20,22,19,.06);
   overflow:hidden;
 }
 @media (prefers-color-scheme: dark){ .mark{border-color:#33392e} }
-.mark img{width:124px;height:auto;display:block}
-.wordmark{
-  font:600 27px/1 var(--sans); letter-spacing:.16em;
-  color:var(--ink); margin:0 0 7px; text-transform:uppercase;
-}
-.wordmark span{color:var(--mute);font-weight:400}
-.house{
-  font:300 17px/1.25 var(--serif); font-style:italic;
-  color:var(--ink2); margin:0 0 10px;
-}
-.rule{width:34px;height:1px;background:var(--line);margin:0 auto 11px}
+.mark img{width:150px;height:auto;display:block}
+.rule{width:34px;height:1px;background:var(--line);margin:0 auto 12px}
 .appname{
   font:500 11px/1 var(--sans); letter-spacing:.13em; text-transform:uppercase;
   color:var(--mute); margin:0;
@@ -153,8 +144,6 @@ button.go[disabled]{opacity:.55;cursor:default;transform:none}
 
     <div class="brand">
       <div class="mark"><img src="/meena_bazaar_logo.png" alt="Meena Bazaar"></div>
-      <p class="wordmark">MBZ<span>.IN</span></p>
-      <p class="house">Meena&nbsp;Bazaar</p>
       <div class="rule"></div>
       <p class="appname">The Buyer&rsquo;s Portal</p>
     </div>

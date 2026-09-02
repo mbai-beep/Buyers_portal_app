@@ -4,6 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>The Buyer's Portal</title>
+<link rel="icon" href="/meena_bazaar_logo.png">
+<link rel="apple-touch-icon" href="/meena_bazaar_logo.png">
+<meta name="robots" content="noindex,nofollow">
 <style>:root{color-scheme:light}html,body{margin:0;padding:0}body{font:14px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found]){display:none!important}</style>
 </head>
 <body>
@@ -183,6 +186,15 @@ h2:not(:first-child){margin-top:38px}
 .gear{flex:none;border:0;background:none;color:var(--mb-mute);font-size:21px;line-height:1;
    cursor:pointer;padding:2px 0 2px 4px}
 .gear:active{color:var(--mb-ink)}
+/* Sign out, in the header rather than buried in Settings: leaving a shared
+   screen is something you want to do quickly. */
+.signout{flex:none;display:flex;align-items:center;justify-content:center;
+   width:30px;height:30px;padding:0;border:1px solid var(--mb-line);border-radius:999px;
+   background:var(--mb-card);color:var(--mb-ink2);cursor:pointer;
+   transition:color .12s,border-color .12s,background .12s}
+.signout:hover{color:var(--mb-bad);border-color:var(--mb-bad)}
+.signout:active{background:var(--mb-badsoft)}
+.signout:focus-visible{outline:2px solid var(--mb-gold);outline-offset:2px}
 .hd .ctrls{display:flex;align-items:center;gap:9px;margin-top:8px}
 .setrow{display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:15px;
    background:var(--mb-line2);margin-bottom:8px}
@@ -3124,6 +3136,13 @@ function header(){
       '<span class="ctrls">'+
         '<button class="fl" onclick="toggleSheet()">'+perChip()+'<u>▾</u></button>'+
         '<button class="gear" onclick="openSettings()" aria-label="Settings">&#9881;</button>'+
+        '<button class="signout" onclick="mbSignOut()" aria-label="Sign out" '+
+          'title="Sign out'+(ME.email?' \u2014 '+ME.email:'')+'">'+
+          '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" '+
+            'stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+
+            '<path d="M15 17l5-5-5-5"></path><path d="M20 12H9"></path>'+
+            '<path d="M12 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h6"></path></svg>'+
+        '</button>'+
       '</span></span></div>'+
     '<div class="sbar"><input type="search" id="sq" placeholder="Design number, order or supplier" '+
       'value="'+sq.replace(/"/g,'&quot;')+'" oninput="setSQ(this.value)"></div>';
