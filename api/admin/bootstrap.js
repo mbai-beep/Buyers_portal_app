@@ -1,6 +1,11 @@
 /**
  * One-time setup, run from inside the deployment.
  *
+ * Creates this app's own tables (portal_users, login_audit) and fills them
+ * from the business's employee table when that table carries email
+ * addresses, or from the roster in the SPA when it does not. The employee
+ * table itself is only ever read.
+ *
  * Turso is only reachable from a host with open egress, so the schema and the
  * roster are installed by calling this once after the first deploy rather than
  * from a laptop:
@@ -17,6 +22,7 @@ import { json, methodNotAllowed, clientIp } from '../../lib/http.js';
 import { initSchema } from '../../lib/db.js';
 import { upsertEmployee, listEmployees } from '../../lib/employees.js';
 import { readRoster } from '../../lib/roster.js';
+import { readHrDirectory } from '../../lib/hr-directory.js';
 
 function tokenOk(given) {
   const expected = process.env.BOOTSTRAP_TOKEN || '';
@@ -42,7 +48,28 @@ export default async function handler(req, res) {
     // than silently leaving it short of columns the app needs.
     const migrations = await initSchema();
 
-    const { people, conflicts } = readRoster();
+    // The business's own employee table is the better source of truth when it
+    // carries email addresses. The roster baked into the SPA is the fallback.
+    const hr = await readHrDirectory();
+    let source, people, conflicts = [], sourceNote;
+
+    if (hr.available && hr.rows.length) {
+      source = `${hr.table} (your employee table)`;
+      people = hr.rows;
+      sourceNote = `Read ${hr.total} rows; ${hr.rows.length} had a usable email address.`;
+    } else {
+      const roster = readRoster();
+      people = roster.people;
+      conflicts = roster.conflicts;
+      source = 'the portal source (TEAMS / V2)';
+      sourceNote = hr.reason === 'no_email_column'
+        ? `${hr.table} has no email column, so sign-ins came from the portal source instead. ` +
+          'Add an email column, or set HR_COL_EMAIL, then run this again.'
+        : hr.reason === 'no_such_table'
+          ? `No ${hr.table} table found, so sign-ins came from the portal source instead.`
+          : `${hr.table} held no rows with an email address, so the portal source was used.`;
+    }
+
     const seeded = [];
     for (const p of people) {
       await upsertEmployee(p);
@@ -54,12 +81,17 @@ export default async function handler(req, res) {
       ok: true,
       schema: migrations.length ? 'migrated' : 'already current',
       migrations,
+      source,
+      sourceNote,
+      hrDetectedColumns: hr.mapping,
+      skippedFromHr: (hr.skipped || []).length,
+      skippedExamples: (hr.skipped || []).slice(0, 5),
       seeded: seeded.length,
       activeEmployees: directory.length,
       conflicts,
       firstPassword: 'MBZ<their email address>',
       next: 'Remove BOOTSTRAP_TOKEN from the environment to close this endpoint.',
-      employees: directory.map((e) => ({ name: e.name, email: e.email, designation: e.designation })),
+      employees: directory.slice(0, 60).map((e) => ({ name: e.name, email: e.email, designation: e.designation })),
     });
   } catch (err) {
     console.error('bootstrap failed', err);

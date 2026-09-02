@@ -37,6 +37,37 @@ the SPA's `ME` constant reads from it, falling back to its original hard-coded
 value when the file is opened directly from disk. So the same file still works
 as a standalone demo.
 
+## Two tables, two owners
+
+This matters more than it sounds.
+
+| Table | Owner | This app |
+|---|---|---|
+| `portal_users` | this app | creates, migrates, writes |
+| `login_audit` | this app | creates, migrates, writes |
+| `employees` | the business (HR) | **reads only** |
+
+`employees` is the HR directory, with its own columns - `emp_code`,
+`emp_name`, `emp_mobile`, `emp_designation`, `hod`. An earlier version of
+`lib/db.js` treated it as the app's own sign-in table and ran
+`ALTER TABLE ... ADD COLUMN` against it, which is not the app's call to make.
+Every migration is now guarded by `OWNED_TABLES`, so it cannot happen by
+accident again.
+
+`lib/hr-directory.js` reads that table instead of reshaping it. It detects
+which column means what (`emp_name` -> name, `emp_designation` ->
+designation, and so on) and reads only what it needs. Override any guess with
+`HR_TABLE`, `HR_COL_EMAIL`, `HR_COL_NAME`, `HR_COL_DESIGNATION`,
+`HR_COL_CODE`, `HR_COL_DEPARTMENT`, `HR_COL_ACTIVE`.
+
+Sign-in is by email address, so a row with no valid email cannot become a
+sign-in. Those rows are skipped and counted rather than guessed at, and
+`/api/admin/bootstrap` reports how many and which.
+
+`GET /api/admin/inspect` (same `BOOTSTRAP_TOKEN` guard) reports every table,
+its columns and row counts, and which column it detected as the email - names
+and counts only, never row values, because that table holds personal data.
+
 ## Passwords
 
 The brief was: everyone's password is `MBZ<their email>`. That is derivable
@@ -85,5 +116,5 @@ its own endpoint:
 | `INVL` | invoices | invoice lines |
 | `BILLX` | ledger | bill and receipt dates |
 | `TRIPS`, `DIARY` | travel | market visits |
-| `TEAMS` | desks | now also seeded into Turso |
+| `TEAMS` | desks | fallback roster when the HR table has no emails |
 | `INBOX`, `APPROVALS`, `TEAMMSG` | workflow | needs write-side tables |
