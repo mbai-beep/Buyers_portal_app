@@ -6,22 +6,45 @@
     (the Cowork sandbox cannot - port 12866 is outside its egress allowlist).
 
         cd D:\AI_ML_Projects\Buyers_Portal_App
-        .\scripts\dump-sqlserver-schema.ps1 -Password 'the-real-password'
+        .\scripts\dump-sqlserver-schema.ps1
+
+    With no arguments it reads SQLSERVER_* out of .env.local. Pass
+    -ServerInstance / -Database / -UserId / -Password to override.
 
     Writes docs\schema-dump.txt. That file is gitignored - send it over, or
     paste the parts that matter.
 #>
 param(
-  [string] $ServerInstance = '38.45.94.39,12866',
-  [string] $Database       = 'zRetailHQ0',
-  [string] $UserId         = 'zorderai',
-  [Parameter(Mandatory=$true)][string] $Password,
+  # Defaults are read from .env.local so no server detail is committed here.
+  [string] $ServerInstance,
+  [string] $Database,
+  [string] $UserId,
+  [string] $Password,
   [string] $OutFile        = 'docs\schema-dump.txt',
   [int]    $TopTables      = 60
 )
 
 $ErrorActionPreference = 'Stop'
 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $OutFile) | Out-Null
+
+# Fill any blank parameter from .env.local (gitignored).
+if (Test-Path '.env.local') {
+  $env_local = @{}
+  Get-Content '.env.local' | ForEach-Object {
+    if ($_ -match '^\s*([A-Z_]+)\s*=\s*(.*?)\s*$') { $env_local[$Matches[1]] = $Matches[2] }
+  }
+  if (-not $ServerInstance) {
+    $h = $env_local['SQLSERVER_HOST']; $p = $env_local['SQLSERVER_PORT']
+    if ($h) { $ServerInstance = if ($p) { "$h,$p" } else { $h } }
+  }
+  if (-not $Database) { $Database = $env_local['SQLSERVER_DATABASE'] }
+  if (-not $UserId)   { $UserId   = $env_local['SQLSERVER_USER'] }
+  if (-not $Password) { $Password = $env_local['SQLSERVER_PASSWORD'] }
+}
+foreach ($pair in @(@('ServerInstance',$ServerInstance), @('Database',$Database),
+                    @('UserId',$UserId), @('Password',$Password))) {
+  if (-not $pair[1]) { throw "Missing -$($pair[0]) and no SQLSERVER_* value for it in .env.local" }
+}
 
 $connectionString = "Server=$ServerInstance;Database=$Database;User ID=$UserId;Password=$Password;" +
                     "Encrypt=True;TrustServerCertificate=True;Connect Timeout=20"

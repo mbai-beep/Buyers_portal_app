@@ -25,14 +25,14 @@ git push -u origin main
 | `SESSION_SECRET` | 48 random bytes | `node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"` — changing it signs everyone out |
 | `TURSO_DATABASE_URL` | `libsql://<db>-<org>.turso.io` | from `turso db show <db> --url` |
 | `TURSO_AUTH_TOKEN` | Turso token | `turso db tokens create <db>` |
-| `SQLSERVER_HOST` | `38.45.94.39` | |
-| `SQLSERVER_PORT` | `12866` | |
-| `SQLSERVER_USER` | `zorderai` | |
-| `SQLSERVER_PASSWORD` | *(the real password)* | never commit it |
+| `SQLSERVER_HOST` | *(the server address)* | see `.env.local`; not recorded in this repo |
+| `SQLSERVER_PORT` | *(the port)* | |
+| `SQLSERVER_USER` | *(the login)* | |
+| `SQLSERVER_PASSWORD` | *(the password)* | never commit it |
 | `SQLSERVER_DATABASE` | `zRetailHQ0` | |
 | `SQLSERVER_ENCRYPT` | `true` | |
 | `SQLSERVER_TRUST_SERVER_CERTIFICATE` | `true` | the host presents a self-signed certificate |
-| `PORTAL_ADMIN_EMAILS` | `mbai@mbindia.net` | comma separated |
+| `PORTAL_ADMIN_EMAILS` | *(admin email addresses)* | comma separated |
 | `SESSION_HOURS` | `8` | optional |
 | `BOOTSTRAP_TOKEN` | a random string | **temporary** — see step 4, then delete it |
 
@@ -82,8 +82,8 @@ before the portal opens.
 ### If `/api/health/sql` fails
 
 Vercel functions call out from a wide, changing pool of IP addresses. If the
-firewall in front of `38.45.94.39:12866` only allows known addresses, the
-function cannot connect. Options, best first:
+firewall in front of the SQL Server only allows known addresses, the function
+cannot connect. Options, best first:
 
 1. Put the database behind a small always-on API on a host you control and
    have Vercel call that.

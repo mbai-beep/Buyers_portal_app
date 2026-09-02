@@ -4,13 +4,17 @@
   "private": true,
   "description": "Meena Bazaar Buyer's Portal - login, employee directory (Turso) and zRetailHQ0 (SQL Server) backend",
   "type": "module",
-  "engines": { "node": "22.x" },
+  "engines": {
+    "node": "22.x"
+  },
   "scripts": {
     "db:init": "node scripts/init-db.mjs",
     "db:seed": "node scripts/seed-employees.mjs",
     "dev": "node scripts/dev-server.mjs",
     "test": "node --test test/*.test.mjs",
-    "sql:check": "node scripts/check-sqlserver.mjs"
+    "sql:check": "node scripts/check-sqlserver.mjs",
+    "check:secrets": "node scripts/check-secrets.mjs --all",
+    "hooks": "node scripts/install-hooks.mjs"
   },
   "dependencies": {
     "@libsql/client": "^0.15.7",
