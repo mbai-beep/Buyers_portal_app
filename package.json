@@ -11,7 +11,7 @@
     "db:init": "node scripts/init-db.mjs",
     "db:seed": "node scripts/seed-employees.mjs",
     "dev": "node scripts/dev-server.mjs",
-    "test": "node --test test/*.test.mjs",
+    "test": "node --experimental-test-module-mocks --test test/*.test.mjs",
     "sql:check": "node scripts/check-sqlserver.mjs",
     "check:secrets": "node scripts/check-secrets.mjs --all",
     "hooks": "node scripts/install-hooks.mjs",

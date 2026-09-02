@@ -17,6 +17,18 @@
     },
     "api/admin/inspect.js": {
       "maxDuration": 30
+    },
+    "api/reports/selftest.js": {
+      "maxDuration": 120,
+      "memory": 1024
+    },
+    "api/reports/home.js": {
+      "maxDuration": 120,
+      "memory": 1024
+    },
+    "api/reports/book.js": {
+      "maxDuration": 120,
+      "memory": 1024
     }
   },
   "rewrites": [
