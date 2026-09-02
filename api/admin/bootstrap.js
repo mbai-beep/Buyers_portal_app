@@ -70,6 +70,28 @@ export default async function handler(req, res) {
           : `${hr.table} held no rows with an email address, so the portal source was used.`;
     }
 
+    // Whoever administers the portal always gets a sign-in. Without this, an
+    // access rule that excludes their designation locks them out of the thing
+    // they are meant to administer - and the only way back in is a database
+    // edit. The rule governs everyone else.
+    const admins = String(process.env.PORTAL_ADMIN_EMAILS || '')
+      .split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
+    const have = new Set(people.map((p) => p.email));
+    const adminsAdded = [];
+    for (const email of admins) {
+      const existing = people.find((p) => p.email === email);
+      if (existing) { existing.role = 'admin'; continue; }
+      const fromHr = (hr.excluded || []).find((e) => e.email === email);
+      people.push({
+        email,
+        name: fromHr?.name || 'Portal Administrator',
+        designation: fromHr?.designation || 'IT / Portal Administrator',
+        department: 'IT', desk: 'Portal administration',
+        role: 'admin', isActive: true,
+      });
+      if (!have.has(email)) adminsAdded.push(email);
+    }
+
     const seeded = [];
     for (const p of people) {
       await upsertEmployee(p);
@@ -90,6 +112,8 @@ export default async function handler(req, res) {
       excludedByAccessRule: (hr.excluded || []).length,
       excludedExamples: (hr.excluded || []).slice(0, 8),
       seeded: seeded.length,
+      adminsAlwaysAdmitted: admins,
+      adminsAddedOutsideRule: adminsAdded,
       activeEmployees: directory.length,
       conflicts,
       firstPassword: 'MBZ<their email address>',
