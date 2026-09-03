@@ -2345,25 +2345,38 @@ window.clearHeard=function(){ heardText=''; capture=Object.assign({},capture,{he
 /* --------------------------------------------------------- the capture screen */
 function newPOView(){
   if(!poDraft) return pickSupplier();
-  const alias=poDraft.supplier, v=D[alias];
+  /* supInfo, not D[alias]: a supplier from the live book has no entry in the
+     sample data, and reading it straight threw before anything rendered -
+     which is what made raising an order impossible. */
+  const alias=poDraft.supplier, info=supInfo(alias), v={vendor:info.vendor, city:info.city};
   const c=capture;
   return backBtn('home')+
     '<div class="pohd"><div><b>'+T(v.vendor)+'</b>'+
-      '<span>'+alias+' · '+T(v.city)+' · '+poDraft.terms+' day terms</span></div>'+
+      '<span>'+alias+(v.city?' · '+T(v.city):'')+' · '+poDraft.terms+' day terms</span></div>'+
       '<button class="swapsup" onclick="poDraft=null;capture=null;heardText=\'\';paint()">Change</button></div>'+
 
     '<div class="cap">'+
       '<div class="caprow">'+
-        '<button class="capbtn'+(c&&c.pics&&c.pics.length?' done':'')+'" onclick="capPic()">'+
-          '<b>📷</b><span>'+(c&&c.pics&&c.pics.length?n0(c.pics.length)+' picture'+(c.pics.length>1?'s':''):'Photograph it')+'</span></button>'+
+        '<button class="capbtn'+(c&&c.pics&&c.pics.length?' done':'')+'" onclick="capPic(true)">'+
+          '<b>📷</b><span>'+(c&&c.pics&&c.pics.length?n0(c.pics.length)+' picture'+(c.pics.length>1?'s':''):'Take a photo')+'</span></button>'+
+        '<button class="capbtn" onclick="capPic(false)">'+
+          '<b>🖼</b><span>Choose a picture</span></button>'+
+      '</div>'+
+      '<div class="caprow">'+
         '<button class="capbtn mic'+(listening?' live':'')+'" onclick="toggleMic()">'+
           '<b>'+(listening?'■':'🎤')+'</b><span>'+(listening?'Listening — tap to stop':'Say the order')+'</span></button>'+
+        '<button class="capbtn" onclick="capByHand()">'+
+          '<b>⌨</b><span>Type it in</span></button>'+
       '</div>'+
+      (capPicError
+        ? '<div class="livebad" style="margin-top:8px">'+capPicError.replace(/</g,'&lt;')+
+          ' <button onclick="clearPicError()">Dismiss</button></div>'
+        : '')+
       (c&&c.pics&&c.pics.length
         ? '<div class="pstrip">'+c.pics.map(function(p,i){
             return '<button class="pth pend" onclick="capDropPic('+i+')"><img src="'+p+'" alt="">'+
               '<span class="ed">Remove</span></button>';
-          }).join('')+'<button class="padd" onclick="capPic()"><b>＋</b><span>Another</span></button></div>'
+          }).join('')+'<button class="padd" onclick="capPic(true)"><b>＋</b><span>Another</span></button></div>'
         : '')+
       '<div class="heardbox'+(listening?' live':'')+'" id="heard">'+
         (heardText || (listening?'Listening…'
@@ -2454,19 +2467,84 @@ window.capAddCol=function(){
 };
 window.capDropCol=function(c){
   const i=capture.colours.indexOf(c); if(i>=0) capture.colours.splice(i,1); paint(); };
-window.capPic=function(){
-  const inp=document.createElement('input'); inp.type='file'; inp.accept='image/*';
-  inp.capture='environment'; inp.style.display='none';
+let capPicError='';
+window.clearPicError=function(){ capPicError=''; paint(); };
+
+/* Blank capture, ready to be filled in by hand, by voice or from a picture. */
+function blankCapture(){
+  return {pics:[], colours:[], sizes:{}, design:'', cat:'', rate:0, qty:0,
+          free:false, days:21, got:{}};
+}
+
+/* Opens the form without needing a photograph or dictation, which on a
+   desktop are often neither available nor wanted. */
+window.capByHand=function(){
+  capture = capture || blankCapture();
+  capture.got = capture.got || {};
+  paint();
+  setTimeout(function(){ const el=document.getElementById('cdz'); if(el) el.focus(); }, 0);
+};
+
+/**
+ * fromCamera true asks for the camera where there is one; false always opens
+ * the picture library, so this works on a laptop as well as a phone.
+ *
+ * The old version set inp.capture as a property, which several browsers
+ * ignore, never cleaned up if the picker was cancelled, and said nothing at
+ * all when a file could not be read.
+ */
+window.capPic=function(fromCamera){
+  capPicError='';
+  const inp=document.createElement('input');
+  inp.type='file';
+  inp.setAttribute('accept','image/*');
+  if(fromCamera) inp.setAttribute('capture','environment');
+  inp.multiple=!fromCamera;
+  inp.style.position='fixed'; inp.style.left='-9999px';
+
+  const done=function(){ try{ inp.remove(); }catch(e){} };
+
   inp.onchange=function(){
-    const f=inp.files&&inp.files[0]; if(!f) return;
-    const rd=new FileReader();
-    rd.onload=function(){ capture=capture||{pics:[],colours:[],sizes:{}};
-      capture.pics=capture.pics||[]; capture.pics.push(rd.result);
-      capture.colours=capture.colours||[]; capture.sizes=capture.sizes||{};
-      capture.got=capture.got||{}; paint(); };
-    rd.readAsDataURL(f); inp.remove();
+    const files=Array.prototype.slice.call(inp.files||[]);
+    if(!files.length){ done(); return; }
+
+    let pending=files.length;
+    files.forEach(function(f){
+      if(f.size > 8*1024*1024){
+        capPicError='“'+(f.name||'That picture')+'” is over 8 MB. Use a smaller one.';
+        if(--pending===0){ done(); paint(); }
+        return;
+      }
+      const rd=new FileReader();
+      rd.onload=function(){
+        capture = capture || blankCapture();
+        capture.pics = capture.pics || [];
+        capture.colours = capture.colours || [];
+        capture.sizes = capture.sizes || {};
+        capture.got = capture.got || {};       // a picture opens the form
+        capture.pics.push(rd.result);
+        if(--pending===0){ done(); }
+        paint();
+      };
+      rd.onerror=function(){
+        capPicError='That picture could not be read. Try another.';
+        if(--pending===0){ done(); }
+        paint();
+      };
+      rd.readAsDataURL(f);
+    });
   };
-  document.body.appendChild(inp); inp.click();
+
+  // Cancelling the picker fires nothing on older browsers, so clean up anyway.
+  inp.oncancel=done;
+  setTimeout(done, 120000);
+
+  document.body.appendChild(inp);
+  try{ inp.click(); }
+  catch(e){
+    capPicError='This browser would not open the picture chooser. Use “Type it in”.';
+    done(); paint();
+  }
 };
 window.capDropPic=function(i){ capture.pics.splice(i,1); paint(); };
 window.addLineToPO=function(){

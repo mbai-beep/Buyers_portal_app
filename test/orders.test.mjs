@@ -221,3 +221,37 @@ test('overlong text is truncated rather than rejected or stored whole', async ()
   assert.equal(full.note.length, 2000);
   assert.equal(full.lines[0].articleNo.length, 100);
 });
+
+test('a query against a database missing the order tables heals itself', async () => {
+  // A deployment shipped portal_orders in SCHEMA but nothing created it,
+  // because migrate() only ran from the bootstrap endpoint. Open Orders
+  // answered "no such table: portal_orders". The order paths now migrate and
+  // retry rather than requiring someone to remember a manual step.
+  const { withSchema, resetSchemaGuard } = await import('../lib/db.js');
+  const c = db();
+
+  await c.execute('DROP TABLE IF EXISTS portal_order_lines');
+  await c.execute('DROP TABLE IF EXISTS portal_orders');
+  resetSchemaGuard();
+
+  await assert.rejects(
+    () => c.execute('SELECT COUNT(*) FROM portal_orders'),
+    /no such table/,
+    'the table really is gone'
+  );
+
+  const listed = await orders.listOrders({ limit: 5 });
+  assert.ok(Array.isArray(listed), 'listing recreated the table instead of failing');
+
+  const created = await orders.createOrder({
+    body: { supplierAlias: 'HEALED', lines: [line()] }, user,
+  });
+  assert.equal(created.ok, true, 'and an order can be raised straight afterwards');
+  assert.ok(await orders.getOrder(created.order.orderNo));
+});
+
+test('withSchema does not swallow a real error', async () => {
+  const { withSchema } = await import('../lib/db.js');
+  await assert.rejects(() => withSchema(async () => { throw new Error('something else broke'); }),
+    /something else broke/);
+});

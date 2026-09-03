@@ -128,6 +128,46 @@ test('the header and the period sheet render for every period', () => {
   assert.deepEqual(failures, []);
 });
 
+test('the new-order screen renders for a supplier only the live book knows', () => {
+  // This is the bug that made "Raise a purchase order" impossible: newPOView
+  // read D[alias] directly, and a supplier from zRetailHQ0 has no entry in
+  // the sample data, so the screen threw before rendering anything. The old
+  // test rendered 'newpo' with no draft, which falls through to the picker
+  // and never touched this path.
+  const ctx = makeContext();
+  vm.runInContext(blocks[0], ctx);
+  vm.runInContext(blocks[1], ctx);
+
+  vm.runInContext("startPO('BRAND-NEW-SUPPLIER'); view='newpo'; paint();", ctx);
+
+  // ...and again with a picture and a part-filled capture card.
+  vm.runInContext(`
+    capture = { pics:['data:image/png;base64,AAA'], colours:['PINK'], sizes:{ L: 4 },
+                design:'A1', cat:'', rate:700, qty:0, free:false, days:21, got:{} };
+    paint();
+  `, ctx);
+
+  // ...and for one of the three the sample data does describe.
+  vm.runInContext("startPO('AHD-NIC'); view='newpo'; paint();", ctx);
+});
+
+test('a picture can be chosen without a camera, and by hand without either', () => {
+  const ctx = makeContext();
+  vm.runInContext(blocks[0], ctx);
+  vm.runInContext(blocks[1], ctx);
+  vm.runInContext("startPO('BRAND-NEW-SUPPLIER'); view='newpo'; paint();", ctx);
+
+  // Typing it in must open the form with no photograph and no dictation.
+  vm.runInContext('capByHand();', ctx);
+  assert.ok(vm.runInContext('!!(capture && capture.got)', ctx),
+    'capByHand should open the capture card');
+  vm.runInContext('paint();', ctx);
+
+  // Both picture routes must be reachable and must not throw.
+  vm.runInContext('capPic(true); capPic(false);', ctx);
+  assert.equal(vm.runInContext('typeof window.capPic', ctx), 'function');
+});
+
 test('the order review and saved screens render, including for a live-only supplier', () => {
   const ctx = makeContext();
   vm.runInContext(blocks[0], ctx);
