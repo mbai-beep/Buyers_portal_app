@@ -113,7 +113,11 @@ column that was not agreed.
 | `VW_MB_AI_DSB_REPORT` | inventory | none | `BalQty`, `BalCostValue` |
 
 Shared dimensions, and the only ones any query may group by: `ArticleNo`,
-`CategoryShortName`, `FabricShortName`, `SupplierAlias`.
+`CategoryShortName`, `SupplierAlias`.
+
+`FabricShortName` was specified but the server rejects it - `Invalid column
+name`. Fabric is therefore off, not deleted: set `SQL_COL_FABRIC` to the real
+column name and every fabric breakdown returns with no other change.
 
 **Stock is read, not derived.** An earlier version computed it as purchased
 minus supplier returns minus sold-ever, because no stock source had been

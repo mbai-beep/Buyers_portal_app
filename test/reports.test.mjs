@@ -41,11 +41,14 @@ const ALLOWED = new Set([
   'PurReturnDt', 'PrtQty', 'PrtNetAmount',
   'CashmemoDt', 'SalesQuantity', 'SalesNetAmount',
   'BalQty', 'BalCostValue',
-  'ArticleNo', 'CategoryShortName', 'FabricShortName', 'SupplierAlias',
+  'ArticleNo', 'CategoryShortName', 'SupplierAlias',
 ]);
 
 /** Columns that exist in the database but are outside the agreed set. */
 const OFF_SPEC = [
+  // FabricShortName was specified but the server rejects it, so it is off
+  // unless SQL_COL_FABRIC names the real column.
+  'FabricShortName',
   'SLSQty', 'SLRQty', 'SLSNetAmount', 'SLRNetAmount', 'ColourName', 'SizeName',
   'SupplierName', 'SupplierCity', 'BranchAlias', 'ItemMRP', 'ItemId',
   'DepartmentShortName', 'CashmemoNo', 'PurInvoiceNo', 'PurchasePrice',
@@ -130,7 +133,9 @@ test('a dimension must be one of the four, not free text', async () => {
   responder = () => [];
   await assert.rejects(() => reports.groupBy('sales', 'CustomerName', {}), /unknown dimension/);
   await assert.rejects(() => reports.groupBy('sales', '1; DROP TABLE x', {}), /unknown dimension/);
-  for (const d of ['article', 'category', 'fabric', 'supplier']) {
+  await assert.rejects(() => reports.groupBy('sales', 'fabric', {}), /unknown dimension/,
+    'fabric is not a dimension while it is switched off');
+  for (const d of ['article', 'category', 'supplier']) {
     issued = [];
     await reports.groupBy('sales', d, { from: '2026-08-01', to: '2026-08-31' });
     assert.match(issued[0].text, /GROUP BY (ArticleNo|CategoryShortName|FabricShortName|SupplierAlias)/);
@@ -296,13 +301,14 @@ test('the required column set is exactly the agreed one', () => {
     }
   }
   assert.deepEqual(req.inventory.columns,
-    ['BalQty', 'BalCostValue', 'ArticleNo', 'CategoryShortName', 'FabricShortName', 'SupplierAlias']);
+    ['BalQty', 'BalCostValue', 'ArticleNo', 'CategoryShortName', 'SupplierAlias']);
+  assert.ok(!JSON.stringify(req).includes('Fabric'), 'fabric is off by default');
 });
 
 test('verifyColumns names a missing column instead of letting a query fail', async () => {
   responder = (text, params) => {
     if (!/sys\.columns/.test(text)) return [{}];
-    const base = ['ArticleNo', 'CategoryShortName', 'SupplierAlias'];   // FabricShortName absent
+    const base = ['ArticleNo', 'CategoryShortName'];   // SupplierAlias absent
     const extra = {
       'VW_MB_POWERBI_PUR_REPORT': ['PurchaseDt', 'PurQty', 'PurNetAmount'],
       'VW_MB_POWERBI_PRT_REPORT': ['PurReturnDt', 'PrtQty', 'PrtNetAmount'],
@@ -314,7 +320,7 @@ test('verifyColumns names a missing column instead of letting a query fail', asy
   const v = await reports.verifyColumns();
   assert.equal(v.ok, false);
   for (const key of ['purchases', 'purchaseReturns', 'sales', 'inventory']) {
-    assert.deepEqual(v.views[key].missing, ['FabricShortName'], `${key} should name the missing column`);
+    assert.deepEqual(v.views[key].missing, ['SupplierAlias'], `${key} should name the missing column`);
   }
 });
 
@@ -373,4 +379,40 @@ test('selftest works to a budget so a slow scan still answers', async () => {
   const r = await reports.selftest({ from: '2026-08-26', to: '2026-09-02', budgetMs: 60 });
   assert.ok(r.passed >= 1 && r.passed < 13, `expected a partial run, got ${r.passed}`);
   assert.match(r.stoppedBecause, /time budget/);
+});
+
+
+test('fabric stays out of every query while it is switched off', async () => {
+  responder = () => [{}];
+  await Promise.all([
+    reports.totals('sales', { from: '2026-08-01', to: '2026-08-31' }),
+    reports.totals('inventory'),
+    reports.articleLeaders({ from: '2026-08-01', to: '2026-08-31', limit: 3 }),
+    reports.supplierDetail({ alias: 'AHD-NIC', from: '2026-08-01', to: '2026-08-31' }),
+  ]);
+  assert.ok(issued.length > 5);
+  for (const q of issued) {
+    assert.ok(!/Fabric/i.test(q.text), `fabric leaked into: ${q.text.slice(0, 110)}`);
+  }
+});
+
+test('SQL_COL_FABRIC turns fabric back on with the real column name', async () => {
+  const original = process.env.SQL_COL_FABRIC;
+  process.env.SQL_COL_FABRIC = 'FabricName';
+  const fresh = await import(`../lib/reports.js?fabric=${Date.now()}`);
+
+  assert.equal(fresh.hasGrain('fabric'), true);
+  issued = [];
+  responder = () => [{}];
+  await fresh.groupBy('sales', 'fabric', { from: '2026-08-01', to: '2026-08-31' });
+  assert.match(issued[0].text, /GROUP BY FabricName/);
+
+  issued = [];
+  await fresh.totals('sales', { from: '2026-08-01', to: '2026-08-31' });
+  assert.match(issued[0].text, /COUNT\(DISTINCT FabricName\) AS fabrics/);
+  assert.ok(fresh.requiredColumns().sales.columns.includes('FabricName'),
+    'verifyColumns should now check for it');
+
+  if (original === undefined) delete process.env.SQL_COL_FABRIC;
+  else process.env.SQL_COL_FABRIC = original;
 });
