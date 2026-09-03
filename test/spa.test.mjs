@@ -63,8 +63,8 @@ function makeContext() {
     navigator: { userAgent: 'node-test', language: 'en-IN' },
     location: { href: 'http://localhost/portal', search: '', pathname: '/portal' },
     localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
-    fetch: async () => ({ ok: true, status: 200, json: async () => ({ ok: true }) }),
-    setTimeout: () => 0,
+    fetch: async (url) => { ctx.__fetched.push(String(url)); return { ok: true, status: 200, json: async () => ({ ok: true, home: {} }) }; },
+    setTimeout: (fn) => { if (typeof fn === 'function') ctx.__timers.push(fn); return 0; },
     clearTimeout() {},
     setInterval: () => 0,
     clearInterval() {},
@@ -76,6 +76,8 @@ function makeContext() {
     Object, Array, String, Number, Boolean, Map, Set, Error, isNaN,
     parseInt, parseFloat, encodeURIComponent, decodeURIComponent,
   };
+  ctx.__timers = [];
+  ctx.__fetched = [];
   ctx.window = ctx;
   ctx.globalThis = ctx;
   return vm.createContext(ctx);
@@ -161,4 +163,36 @@ test('the sign-out handler and settings sheet exist and run', () => {
   vm.runInContext(blocks[1], ctx);
   assert.equal(vm.runInContext('typeof window.mbSignOut', ctx), 'function');
   vm.runInContext('openSettings();', ctx);
+});
+
+
+test('loading the page schedules the first read of the live figures', async () => {
+  // The block that does this has now been deleted twice by edits to its
+  // neighbours, each time leaving the tiles permanently showing a dash.
+  const ctx = makeContext();
+  vm.runInContext(blocks[0], ctx);
+  vm.runInContext(blocks[1], ctx);
+
+  const timers = vm.runInContext('__timers', ctx);
+  assert.ok(timers.length > 0, 'nothing was scheduled on load');
+
+  for (const fn of [...timers]) { try { await fn(); } catch { /* stub DOM */ } }
+  const fetched = vm.runInContext('__fetched', ctx);
+  assert.ok(
+    fetched.some((u) => u.includes('/api/reports/home')),
+    `no initial call to /api/reports/home; fetched: ${JSON.stringify(fetched)}`
+  );
+});
+
+test('a period change asks for that period, not the old one', async () => {
+  const ctx = makeContext();
+  vm.runInContext(blocks[0], ctx);
+  vm.runInContext(blocks[1], ctx);
+  vm.runInContext('__fetched.length = 0;', ctx);
+
+  await vm.runInContext("setPer('fy'); loadLive();", ctx);
+  const fetched = vm.runInContext('__fetched', ctx);
+  const call = fetched.find((u) => u.includes('/api/reports/home'));
+  assert.ok(call, 'no request was made');
+  assert.match(call, /from=\d{4}-04-01/, 'the financial year should start on 1 April');
 });
