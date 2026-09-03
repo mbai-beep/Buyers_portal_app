@@ -200,6 +200,19 @@ h2:not(:first-child){margin-top:38px}
 .databanner .dbi{flex:none;font-size:14px;line-height:1.2}
 .databanner .dbx{flex:1;min-width:0}
 
+/* The home tiles read zRetailHQ0. These two say so while it is happening, and
+   say plainly when it failed - the tiles show a dash rather than a stale or
+   invented number. */
+.livewait{padding:9px 13px;margin:0 0 8px;border-radius:12px;
+  background:var(--mb-tint);color:var(--mb-ink2);font-size:12px}
+.livebad{padding:10px 13px;margin:0 0 8px;border-radius:12px;
+  background:var(--mb-badsoft);color:var(--mb-bad);font-size:12px;line-height:1.45;
+  border:1px solid var(--mb-bad)}
+.livebad b{font-weight:700}
+.livebad button{font:inherit;font-size:11.5px;font-weight:600;margin-left:6px;
+  padding:4px 10px;border-radius:999px;border:1px solid var(--mb-bad);
+  background:transparent;color:var(--mb-bad);cursor:pointer}
+
 /* Sign out, in the header rather than buried in Settings: leaving a shared
    screen is something you want to do quickly. */
 .signout{flex:none;display:flex;align-items:center;justify-content:center;
@@ -2065,15 +2078,19 @@ const YDAY=(function(){ const d=new Date(TODAY_ISO+'T00:00:00Z'); d.setUTCDate(d
   return y<=FEED_TO ? y : FEED_TO; })();
 const FEED_SHORT = YDAY!==(function(){ const d=new Date(TODAY_ISO+'T00:00:00Z');
   d.setUTCDate(d.getUTCDate()-1); return d.toISOString().slice(0,10); })();
+/* Every period now drives a real query against CashmemoDt, PurchaseDt and
+   PurReturnDt, so the old notes - "three suppliers only", "whole book" -
+   described the sample data and are gone. The note shows the dates instead,
+   filled in from liveRange() so what you pick is what is queried. */
 const PERIODS=[
-  {k:'yday',  lab:'Yesterday',        note:pretty(YDAY)+' — three suppliers only'},
-  {k:'week',  lab:'This week',        note:'three suppliers only'},
-  {k:'d7',    lab:'Last seven days',  note:'whole book'},
-  {k:'d30',   lab:'Last thirty days',  note:'whole book'},
-  {k:'month', lab:'This month',       note:'three suppliers only'},
-  {k:'last',  lab:'Last month',       note:'three suppliers only'},
-  {k:'fy',    lab:'Financial year',   note:'whole book, 1 April on'},
-  {k:'range', lab:'Choose dates',     note:'three suppliers only'}
+  {k:'yday',  lab:'Yesterday'},
+  {k:'week',  lab:'This week'},
+  {k:'d7',    lab:'Last seven days'},
+  {k:'d30',   lab:'Last thirty days'},
+  {k:'month', lab:'This month'},
+  {k:'last',  lab:'Last month'},
+  {k:'fy',    lab:'Financial year'},
+  {k:'range', lab:'Choose dates'}
 ];
 let from='2026-08-01', to=TODAY_ISO;
 function monthBounds(back){
@@ -2667,21 +2684,40 @@ function queueCounts(){
    scroll here has been moved behind its own page, capped, one tap away.       */
 
 function kpiTiles(){
-  const c=queueCounts();
-  const gs=groupSplit(), wide=bookWide();
-  const totQ=GROUPS.reduce(function(a,g){return a+gs[g.k].q;},0);
-  const totB=GROUPS.reduce(function(a,g){return a+gs[g.k].bal;},0);
-  const designs=BOOK.reduce(function(a,x){return a+x.ar;},0);
-  const needs=c.sign+c.answer;
-  const K=[
-    ['Sold',      wide?n0(totQ):'—', wide?perLabel():'not held for all 225',''],
-    ['With us',   n0(totB),               'pieces right now',''],
-    ['Suppliers', n0(BOOK.length),        'on your book',''],
-    ['Designs',   n0(designs),            'bought this year',''],
-    ['Needs you', n0(needs),              needs?'decisions waiting':'nothing waiting', needs?'hot':''],
-    ['Late',      n0(c.chase),            c.chase?'orders past date':'nothing late',   c.chase?'warn':'']
+  const L = MBLIVE, h = L.home;
+  const dash = L.status==='loading' ? '&hellip;' : '—';
+  const q = v => (h && typeof v==='number') ? n0(v) : dash;
+
+  /* Each tile names the view and window its number came from, because
+     "suppliers" and "designs" have several defensible answers and a bare
+     count invites the wrong one. */
+  const K = h ? [
+    ['Sold',      q(h.sold&&h.sold.qty),          liveRangeLabel(), ''],
+    ['With us',   q(h.withUs&&h.withUs.qty),      'in stock now', ''],
+    ['Suppliers', q(h.suppliers&&h.suppliers.boughtFromEver), 'bought from, ever', ''],
+    ['Designs',   q(h.designs&&h.designs.inStockNow),         'in stock now', ''],
+    ['Purchased', q(h.purchased&&h.purchased.qty), liveRangeLabel(), ''],
+    ['Returned',  q(h.returnedToSuppliers&&h.returnedToSuppliers.qty),
+                  'to suppliers, '+liveRangeLabel(), '']
+  ] : [
+    ['Sold', dash, liveRangeLabel(), ''],
+    ['With us', dash, 'in stock now', ''],
+    ['Suppliers', dash, 'bought from, ever', ''],
+    ['Designs', dash, 'in stock now', ''],
+    ['Purchased', dash, liveRangeLabel(), ''],
+    ['Returned', dash, 'to suppliers', '']
   ];
-  return '<div class="kpis">'+K.map(function(k){
+
+  const strip =
+    L.status==='error'
+      ? '<div class="livebad"><b>These figures could not be loaded.</b> '+
+        String(L.error||'').replace(/</g,'&lt;')+
+        ' <button onclick="loadLive()">Try again</button></div>'
+      : L.status==='loading'
+        ? '<div class="livewait">Reading zRetailHQ0 for '+liveRangeLabel()+'&hellip;</div>'
+        : '';
+
+  return strip+'<div class="kpis">'+K.map(function(k){
     return '<div class="kpi '+k[3]+'"><span>'+k[0]+'</span><b>'+k[1]+'</b><u>'+k[2]+'</u></div>';
   }).join('')+'</div>';
 }
@@ -2697,12 +2733,17 @@ function home(){
     ['Not moving at all',      c.stop,   'money standing still',               "openQueue('stop')"]
   ].filter(function(x){ return x[1]>0; }).slice(0,5);
 
+  /* The real date, not TODAY_ISO: that constant belongs to the sample data and
+     sat above tiles labelled with today's dates, which read as a bug. The
+     count that used to sit on the right came from the sample queues, so it
+     showed a fabricated number above live figures - the period being queried
+     is both true and more useful. */
+  const dToday = liveToday();
   return '<div class="daybar">'+
-      '<span class="dayd"><b>'+MM[+TODAY_ISO.slice(5,7)-1]+' '+(+TODAY_ISO.slice(8,10))+
+      '<span class="dayd"><b>'+MM[+dToday.slice(5,7)-1]+' '+(+dToday.slice(8,10))+
         '</b><u>'+['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
-        [new Date(TODAY_ISO+'T00:00:00Z').getUTCDay()]+'</u></span>'+
-      '<span class="dayk"><span'+(needs?' class="hot"':'')+'><b>'+n0(needs)+
-        '</b>on you</span></span></div>'+
+        [new Date(dToday+'T00:00:00Z').getUTCDay()]+'</u></span>'+
+      '<span class="dayk"><span><b>'+perChip()+'</b>'+liveRangeLabel()+'</span></span></div>'+
 
     kpiTiles()+
 
@@ -3167,12 +3208,17 @@ function greetWord(){ const h=new Date().getHours();
   return h<12?'Good morning':(h<17?'Good afternoon':'Good evening'); }
 
 function sheet(){
+  /* Each row shows the dates it will query, worked out the same way the
+     request is, so the filter and the figures cannot disagree. */
+  const was = per;
+  const dates = k => { per = k; const R = liveRange(); per = was;
+    return R.from===R.to ? pretty(R.from) : pretty(R.from)+' – '+pretty(R.to); };
   return '<h4>Show me</h4><div class="op">'+PERIODS.map(p=>
     '<button aria-pressed="'+(p.k===per)+'" onclick="setPer(\''+p.k+'\')">'+p.lab+
-    '<u>'+p.note+'</u></button>').join('')+'</div>'+
+    '<u>'+(p.k==='range'?'any two dates':dates(p.k))+'</u></button>').join('')+'</div>'+
     (per==='range'
       ? '<div class="range"><label>From<input type="date" id="rf" value="'+from+'"></label>'+
-        '<label>To<input type="date" id="rt" value="'+to+'" max="'+TODAY_ISO+'"></label>'+
+        '<label>To<input type="date" id="rt" value="'+to+'" max="'+liveToday()+'"></label>'+
         '<button class="apply" onclick="applyRange()">Show these dates</button>'+
         '<span class="rnote2">Any two dates. Unlike the supplier screen this does not stop at '+
         '1 April \u2014 a buyer compares against last year.</span></div>'
@@ -3182,9 +3228,9 @@ window.applyRange=function(){
   const a=(document.getElementById('rf')||{}).value, b=(document.getElementById('rt')||{}).value;
   if(!a||!b) return;
   from = a<=b?a:b; to = a<=b?b:a;
-  sheetOn=false; paint();
+  sheetOn=false; paint(); loadLive();
 };
-window.setPer=k=>{ per=k; sheetOn=(k==='range'); paint(); };
+window.setPer=k=>{ per=k; sheetOn=(k==='range'); paint(); loadLive(); };
 window.toggleSheet=()=>{ sheetOn=!sheetOn; paint(); };
 window.closeSheet=function(){ const el=document.getElementById('sheet');
   el.className='sheet'; sheetOn=false; };
@@ -3228,11 +3274,19 @@ function openSettings(){
   if(d && d.source==='live'){ el.hidden=true; return; }
   el.hidden=false;
   el.innerHTML='<span class="dbi">&#9888;</span><span class="dbx">'+
-    '<b>Sample figures.</b> Every number on these screens is illustrative data '+
-    'built into this app \u2014 sales, balances, suppliers and orders are not yet '+
-    'read from zRetailHQ0. Do not use them for a buying decision.'+
+    '<b>Home tiles are live from zRetailHQ0.</b> The tiles read sales, purchases, '+
+    'purchase returns and stock for the period you pick. Everything below them \u2014 '+
+    'the queues, orders, approvals, messages and supplier screens \u2014 is still '+
+    'illustrative data built into this app. Do not use those for a buying decision.'+
     (d && d.note ? ' '+d.note : '')+'</span>';
 })();
+
+/* First paint shows the tiles as pending; this fills them. */
+if (typeof window !== 'undefined') {
+  const start = () => { try { loadLive(); } catch (e) { /* paint() will show the error */ } };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
+  else setTimeout(start, 0);
+}
 
 window.mbSignOut=async function(){
   try { await fetch('/api/auth/logout',{method:'POST',credentials:'same-origin'}); } catch(e){}
@@ -3248,6 +3302,95 @@ window.mbSignOut=async function(){
 })();
 window.openSettings=openSettings;
 window.setLang=function(x){ lang=x; openSettings(); };
+
+/* ------------------------------------------------------------ live figures
+   The screens below were built on the constants at the top of this file. The
+   home tiles now come from zRetailHQ0 instead, through /api/reports/home.
+
+   Two rules here, both deliberate. The date range is computed from the real
+   current date, not TODAY_ISO - that constant belongs to the sample data and
+   using it would query the wrong days. And a failed fetch never falls back to
+   the sample numbers: it says so. A wrong figure that looks right is worse
+   than a missing one on a screen someone buys stock from.
+*/
+const MBLIVE = {
+  status: 'idle',        // idle | loading | ok | error
+  home: null,
+  error: null,
+  range: null,
+  at: null,
+};
+
+function liveToday(){
+  const d = new Date();
+  return new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()))
+    .toISOString().slice(0,10);
+}
+
+/* The date window for the chosen period, against the real calendar. */
+function liveRange(){
+  const today = liveToday();
+  const t = Date.parse(today + 'T00:00:00Z');
+  const iso = ms => new Date(ms).toISOString().slice(0,10);
+  const back = n => iso(t - n*86400000);
+  const y = +today.slice(0,4), m = +today.slice(5,7);
+
+  switch(per){
+    case 'yday':  return {from:back(1), to:back(1)};
+    case 'week': {
+      const d = new Date(t), dow = (d.getUTCDay()+6)%7;   // Monday = 0
+      d.setUTCDate(d.getUTCDate()-dow);
+      return {from:d.toISOString().slice(0,10), to:today};
+    }
+    case 'd7':    return {from:back(6),  to:today};
+    case 'd30':   return {from:back(29), to:today};
+    case 'month': return {from:today.slice(0,7)+'-01', to:today};
+    case 'last': {
+      const st = new Date(Date.UTC(y, m-2, 1)), en = new Date(Date.UTC(y, m-1, 0));
+      return {from:st.toISOString().slice(0,10), to:en.toISOString().slice(0,10)};
+    }
+    case 'fy':    return {from:(m>=4?y:y-1)+'-04-01', to:today};
+    case 'range': return {from:from, to:to};
+    default:      return {from:back(29), to:today};
+  }
+}
+
+function liveRangeLabel(){
+  const R = liveRange();
+  return R.from===R.to ? pretty(R.from) : pretty(R.from)+' – '+pretty(R.to);
+}
+
+let liveSeq = 0;
+async function loadLive(){
+  const R = liveRange();
+  const mine = ++liveSeq;                 // a later pick must win
+  MBLIVE.status='loading'; MBLIVE.error=null; MBLIVE.range=R;
+  MBLIVE.home=null;              // the pending period is not the loaded one
+  paint();
+  try{
+    const res = await fetch('/api/reports/home?from='+R.from+'&to='+R.to,
+                            {credentials:'same-origin'});
+    if(res.status===401){ location.href='/login?next=%2Fportal'; return; }
+    const data = await res.json().catch(()=>({}));
+    if(mine!==liveSeq) return;
+    if(!res.ok || !data.ok){
+      MBLIVE.status='error';
+      MBLIVE.error=(data.detail||data.message||('HTTP '+res.status));
+      /* Drop the previous figures. Keeping them would leave the tiles showing
+         one period's numbers under another period's label - which is worse
+         than showing nothing, because it looks right. */
+      MBLIVE.home=null; MBLIVE.at=null;
+    } else {
+      MBLIVE.status='ok'; MBLIVE.home=data.home; MBLIVE.at=new Date();
+    }
+  }catch(e){
+    if(mine!==liveSeq) return;
+    MBLIVE.status='error'; MBLIVE.error='No response from the server.';
+    MBLIVE.home=null; MBLIVE.at=null;
+  }
+  paint();
+}
+window.loadLive=loadLive;
 
 let alertT=null;
 function alertBar(msg){

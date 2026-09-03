@@ -202,8 +202,13 @@ test('stock is read from the inventory view, not derived', async () => {
   assert.equal(h.withUs.qty, 252186, 'straight from BalQty');
   assert.equal(h.withUs.costValue, 187000000);
   assert.equal(h.withUs.source, 'VW_MB_AI_DSB_REPORT');
-  assert.equal(h.designsInStock, 12090);
-  assert.equal(h.suppliers, 225);
+
+  // Each count says which view and window it came from: the same question
+  // ("how many suppliers?") has four defensible answers.
+  assert.equal(h.designs.inStockNow, 12090);
+  assert.equal(h.suppliers.withStockNow, 225);
+  assert.equal(h.suppliers.boughtFromEver, 220);
+  assert.equal(h.designs.boughtEver, 9000);
   assert.equal(h.sold.qty, 108498);
   assert.equal(h.returnedToSuppliers.qty, 4000);
   assert.equal(h.financialYearFrom, '2026-04-01');
