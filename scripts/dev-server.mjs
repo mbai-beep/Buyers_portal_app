@@ -39,6 +39,7 @@ const REWRITES = [
   [/^\/api\/reports\/([\w-]+)\/?$/, (m) => `/api/reports?report=${m[1]}`],
   [/^\/api\/admin\/([\w-]+)\/?$/, (m) => `/api/admin?action=${m[1]}`],
   [/^\/api\/health\/([\w-]+)\/?$/, (m) => `/api/health?check=${m[1]}`],
+  [/^\/api\/orders\/([\w-]+)\/?$/, (m) => `/api/orders?action=${m[1]}`],
 ];
 
 async function serveStatic(res, urlPath) {

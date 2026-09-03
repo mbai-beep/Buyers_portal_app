@@ -14,6 +14,10 @@
     "api/reports.js": {
       "maxDuration": 60,
       "memory": 1024
+    },
+    "api/orders.js": {
+      "maxDuration": 30,
+      "memory": 1024
     }
   },
   "rewrites": [
@@ -36,6 +40,10 @@
     {
       "source": "/api/health/:check",
       "destination": "/api/health?check=:check"
+    },
+    {
+      "source": "/api/orders/:action",
+      "destination": "/api/orders?action=:action"
     }
   ],
   "headers": [
