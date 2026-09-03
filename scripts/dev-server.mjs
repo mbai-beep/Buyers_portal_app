@@ -27,9 +27,18 @@ const TYPES = {
   '.woff2': 'font/woff2',
 };
 
+/**
+ * The same rewrites vercel.json declares, so a local run routes exactly like
+ * production does. The reports, admin and health families each sit behind one
+ * function (Vercel's Hobby plan allows 12 per deployment), and the readable
+ * path is turned into a query parameter.
+ */
 const REWRITES = [
-  [/^\/login\/?$/, '/index.html'],
-  [/^\/portal\/?$/, '/api/portal'],
+  [/^\/login\/?$/, () => '/index.html'],
+  [/^\/portal\/?$/, () => '/api/portal'],
+  [/^\/api\/reports\/([\w-]+)\/?$/, (m) => `/api/reports?report=${m[1]}`],
+  [/^\/api\/admin\/([\w-]+)\/?$/, (m) => `/api/admin?action=${m[1]}`],
+  [/^\/api\/health\/([\w-]+)\/?$/, (m) => `/api/health?check=${m[1]}`],
 ];
 
 async function serveStatic(res, urlPath) {
@@ -61,7 +70,14 @@ async function resolveFunction(apiPath) {
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://localhost:${PORT}`);
   let pathname = url.pathname;
-  for (const [re, to] of REWRITES) if (re.test(pathname)) { pathname = to; break; }
+  for (const [re, to] of REWRITES) {
+    const m = re.exec(pathname);
+    if (!m) continue;
+    const rewritten = new URL(to(m), `http://localhost:${PORT}`);
+    pathname = rewritten.pathname;
+    for (const [k, v] of rewritten.searchParams) url.searchParams.set(k, v);
+    break;
+  }
 
   if (pathname.startsWith('/api/')) {
     const file = await resolveFunction(pathname);
@@ -70,6 +86,7 @@ const server = http.createServer(async (req, res) => {
       // Cache-bust so edits are picked up without a restart.
       const mod = await import(`${file}?t=${Date.now()}`);
       req.query = Object.fromEntries(url.searchParams);
+      req.url = `${pathname}?${url.searchParams.toString()}`;
       await mod.default(req, res);
     } catch (err) {
       console.error(`[${req.method} ${pathname}]`, err);

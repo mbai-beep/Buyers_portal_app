@@ -6,28 +6,13 @@
       "maxDuration": 20,
       "memory": 1024
     },
-    "api/admin/bootstrap.js": {
+    "api/admin.js": {
       "includeFiles": "assets/**",
       "maxDuration": 60,
       "memory": 1024
     },
-    "api/admin/diagnose.js": {
+    "api/reports.js": {
       "maxDuration": 60,
-      "memory": 1024
-    },
-    "api/admin/inspect.js": {
-      "maxDuration": 30
-    },
-    "api/reports/selftest.js": {
-      "maxDuration": 120,
-      "memory": 1024
-    },
-    "api/reports/home.js": {
-      "maxDuration": 120,
-      "memory": 1024
-    },
-    "api/reports/book.js": {
-      "maxDuration": 120,
       "memory": 1024
     }
   },
@@ -39,6 +24,18 @@
     {
       "source": "/portal",
       "destination": "/api/portal"
+    },
+    {
+      "source": "/api/reports/:report",
+      "destination": "/api/reports?report=:report"
+    },
+    {
+      "source": "/api/admin/:action",
+      "destination": "/api/admin?action=:action"
+    },
+    {
+      "source": "/api/health/:check",
+      "destination": "/api/health?check=:check"
     }
   ],
   "headers": [

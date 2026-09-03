@@ -212,10 +212,31 @@ test('selftest reports each query rather than failing on the first', async () =>
   responder = () => { if (++n === 3) throw new Error('Invalid column name "Nope"'); return [{}]; };
   const r = await reports.selftest({ from: '2026-08-26', to: '2026-09-02' });
   assert.equal(r.failed, 1);
-  assert.ok(r.passed > 8);
-  const broken = r.results.find((x) => !x.ok);
+  assert.ok(r.passed > 8, 'a bad column stops that check only');
+  const broken = r.results.find((x) => x.ok === false);
   assert.match(broken.error, /Invalid column name/);
-  assert.ok(r.results.every((x) => typeof x.ms === 'number'));
+  assert.equal(r.stoppedBecause, null);
+});
+
+test('selftest stops at once when the server cannot be reached', async () => {
+  // Thirteen checks each waiting out a connect timeout took over three
+  // minutes and would be killed by the platform before reporting anything.
+  let attempts = 0;
+  responder = () => { attempts++; throw new Error('Failed to connect to 38.45.94.39:12866 in 8000ms'); };
+  const r = await reports.selftest({ from: '2026-08-26', to: '2026-09-02' });
+  assert.equal(attempts, 1, 'only the first check should have been attempted');
+  assert.equal(r.failed, 1);
+  assert.ok(r.skipped > 10);
+  assert.match(r.stoppedBecause, /could not be reached/);
+  assert.match(r.results[0].error, /Failed to connect/);
+});
+
+test('selftest works to a budget so a slow scan still answers', async () => {
+  responder = async () => { await new Promise((r) => setTimeout(r, 30)); return [{}]; };
+  const r = await reports.selftest({ from: '2026-08-26', to: '2026-09-02', budgetMs: 60 });
+  assert.ok(r.passed >= 1 && r.passed < 13, `expected a partial run, got ${r.passed}`);
+  assert.ok(r.skipped > 0);
+  assert.match(r.stoppedBecause, /time budget/);
 });
 
 test('daily sales come back as plain ISO dates', async () => {
