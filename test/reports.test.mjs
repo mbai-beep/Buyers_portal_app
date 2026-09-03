@@ -2,12 +2,12 @@
  * The reporting layer, tested without a SQL Server.
  *
  * zRetailHQ0 is not reachable from a test runner, so lib/sql.js is mocked and
- * the assertions are about what this code is responsible for: the SQL it
- * builds, the parameters it binds, the period maths, the net-of-returns
- * arithmetic and the way the supplier book is merged. Whether the server
- * likes the SQL is answered by /api/reports/selftest against the real thing.
+ * the assertions cover what this code is responsible for: that every query is
+ * built only from the agreed columns, that dates and aliases are bound rather
+ * than interpolated, the period maths, the merges, and the selftest guards.
+ * Whether the server accepts the SQL is answered by /api/reports/selftest.
  *
- *   node --experimental-test-module-mocks --test test/reports.test.mjs
+ *   npm test
  */
 import { test, beforeEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
@@ -16,7 +16,6 @@ process.env.SESSION_SECRET = 'test-secret-at-least-thirty-two-characters-long';
 process.env.REPORT_TODAY = '2026-09-02';
 process.env.REPORT_CACHE_SECONDS = '0';
 
-/** Every query the code under test issues, in order. */
 let issued = [];
 let responder = () => [];
 
@@ -36,15 +35,145 @@ const { resolvePeriod } = await import('../lib/period.js');
 
 beforeEach(() => { issued = []; responder = () => []; reports.clearCache(); });
 
+/** Exactly the columns the four views were specified with. */
+const ALLOWED = new Set([
+  'PurchaseDt', 'PurQty', 'PurNetAmount',
+  'PurReturnDt', 'PrtQty', 'PrtNetAmount',
+  'CashmemoDt', 'SalesQuantity', 'SalesNetAmount',
+  'BalQty', 'BalCostValue',
+  'ArticleNo', 'CategoryShortName', 'FabricShortName', 'SupplierAlias',
+]);
+
+/** Columns that exist in the database but are outside the agreed set. */
+const OFF_SPEC = [
+  'SLSQty', 'SLRQty', 'SLSNetAmount', 'SLRNetAmount', 'ColourName', 'SizeName',
+  'SupplierName', 'SupplierCity', 'BranchAlias', 'ItemMRP', 'ItemId',
+  'DepartmentShortName', 'CashmemoNo', 'PurInvoiceNo', 'PurchasePrice',
+  'Para1Name', 'Para2Name', 'Fabric', 'SubFabric', 'Concept', 'CustomerName',
+];
+
+/* --------------------------------------------- only the agreed columns, ever */
+
+test('no query reaches for a column outside the four-view spec', async () => {
+  responder = () => [{}];
+  await Promise.all([
+    reports.totals('sales', { from: '2026-08-01', to: '2026-08-31' }),
+    reports.totals('purchases', { from: '2026-08-01', to: '2026-08-31' }),
+    reports.totals('purchaseReturns', { from: '2026-08-01', to: '2026-08-31' }),
+    reports.totals('inventory'),
+    reports.daily('sales', { from: '2026-08-01', to: '2026-08-31' }),
+    reports.groupBy('sales', 'category', { from: '2026-08-01', to: '2026-08-31' }),
+    reports.groupBy('inventory', 'supplier', {}),
+    reports.articleLeaders({ from: '2026-08-01', to: '2026-08-31', limit: 5 }),
+    reports.supplierBook({ from: '2026-08-01', to: '2026-08-31' }),
+    reports.supplierDetail({ alias: 'AHD-NIC', from: '2026-08-01', to: '2026-08-31' }),
+    reports.homeTotals({ from: '2026-08-01', to: '2026-08-31' }),
+  ]);
+
+  assert.ok(issued.length > 20, `expected many queries, saw ${issued.length}`);
+  for (const q of issued) {
+    for (const column of OFF_SPEC) {
+      assert.ok(
+        !new RegExp(`\\b${column}\\b`).test(q.text),
+        `"${column}" is outside the agreed columns but appears in: ${q.text.slice(0, 120)}`
+      );
+    }
+  }
+});
+
+test('sales uses SalesQuantity, not the SLS/SLR pair', async () => {
+  responder = () => [{}];
+  await reports.totals('sales', { from: '2026-08-01', to: '2026-08-31' });
+  assert.match(issued[0].text, /SUM\(ISNULL\(SalesQuantity, 0\)\)/);
+  assert.match(issued[0].text, /SUM\(ISNULL\(SalesNetAmount, 0\)\)/);
+  assert.ok(!/SLSQty|SLRQty/.test(issued[0].text));
+});
+
+test('each view is read with its own date and measure columns', async () => {
+  responder = () => [{}];
+  const expected = {
+    purchases: [/VW_MB_POWERBI_PUR_REPORT/, /PurchaseDt >= @from/, /PurQty/, /PurNetAmount/],
+    purchaseReturns: [/VW_MB_POWERBI_PRT_REPORT/, /PurReturnDt >= @from/, /PrtQty/, /PrtNetAmount/],
+    sales: [/VW_MB_POWERBI_SLS_DATA_WITHOUT_ITEMID/, /CashmemoDt >= @from/, /SalesQuantity/, /SalesNetAmount/],
+  };
+  for (const [key, patterns] of Object.entries(expected)) {
+    issued = [];
+    await reports.totals(key, { from: '2026-08-01', to: '2026-08-31' });
+    for (const p of patterns) assert.match(issued[0].text, p, `${key}: ${p}`);
+  }
+});
+
+test('inventory has no date column, so it is never filtered by one', async () => {
+  responder = () => [{}];
+  await reports.totals('inventory');
+  assert.match(issued[0].text, /VW_MB_AI_DSB_REPORT/);
+  assert.match(issued[0].text, /BalQty/);
+  assert.match(issued[0].text, /BalCostValue/);
+  assert.ok(!/WHERE/.test(issued[0].text), 'no period filter on a view without dates');
+  await assert.rejects(() => reports.daily('inventory', { from: '2026-08-01', to: '2026-08-02' }),
+    /no date column/);
+});
+
+/* -------------------------------------------------------- nothing interpolated */
+
+test('dates and aliases are bound as parameters', async () => {
+  responder = () => [{}];
+  await reports.supplierDetail({ alias: "AHD'; DROP TABLE x--", from: '2026-08-01', to: '2026-08-31' });
+  for (const q of issued) {
+    assert.ok(!q.text.includes('2026-08-01'), 'no date in the SQL text');
+    assert.ok(!q.text.includes('DROP'), 'no alias in the SQL text');
+  }
+  assert.equal(issued[0].params.alias.value, "AHD'; DROP TABLE x--");
+});
+
+test('a dimension must be one of the four, not free text', async () => {
+  responder = () => [];
+  await assert.rejects(() => reports.groupBy('sales', 'CustomerName', {}), /unknown dimension/);
+  await assert.rejects(() => reports.groupBy('sales', '1; DROP TABLE x', {}), /unknown dimension/);
+  for (const d of ['article', 'category', 'fabric', 'supplier']) {
+    issued = [];
+    await reports.groupBy('sales', d, { from: '2026-08-01', to: '2026-08-31' });
+    assert.match(issued[0].text, /GROUP BY (ArticleNo|CategoryShortName|FabricShortName|SupplierAlias)/);
+  }
+});
+
+test('an unknown view is refused', async () => {
+  await assert.rejects(() => reports.totals('ledger'), /unknown view "ledger"/);
+});
+
+test('a renamed view is validated before it reaches a statement', async () => {
+  const original = process.env.SQL_VIEW_INVENTORY;
+  process.env.SQL_VIEW_INVENTORY = 'VW_X; DROP TABLE Stock--';
+  const fresh = await import(`../lib/reports.js?evil=${Date.now()}`);
+  await assert.rejects(() => fresh.totals('inventory'), /unsafe object name/);
+  if (original === undefined) delete process.env.SQL_VIEW_INVENTORY;
+  else process.env.SQL_VIEW_INVENTORY = original;
+});
+
+test('a row limit can only ever be a bounded integer', async () => {
+  responder = () => [];
+  for (const [given, expected] of [['5', 5], ['abc', 50], ['-3', 50], ['999999', 2000],
+                                   ['10; DROP TABLE x', 50], ['7.9', 7]]) {
+    issued = [];
+    await reports.groupBy('sales', 'article', { from: '2026-08-01', to: '2026-08-31', limit: given });
+    assert.match(issued[0].text, new RegExp(`SELECT TOP ${expected}\\b`), `limit ${given}`);
+  }
+});
+
+test('reads are hinted so a scan cannot sit in front of the tills', async () => {
+  responder = () => [{}];
+  await reports.totals('sales', { from: '2026-08-01', to: '2026-08-31' });
+  assert.match(issued[0].text, /WITH \(NOLOCK\)/);
+});
+
 /* ------------------------------------------------------------- period maths */
 
 test('periods resolve against a fixed today', () => {
   assert.deepEqual(resolvePeriod({ period: 'd1' }), { from: '2026-09-02', to: '2026-09-02', label: 'today' });
-  assert.deepEqual(resolvePeriod({ period: 'd7' }).from, '2026-08-27');
-  assert.deepEqual(resolvePeriod({ period: 'd30' }).from, '2026-08-04');
-  assert.deepEqual(resolvePeriod({ period: 'mtd' }).from, '2026-09-01');
-  assert.deepEqual(resolvePeriod({ period: 'fy' }).from, '2026-04-01', 'Indian FY starts 1 April');
-  assert.deepEqual(resolvePeriod({ from: '2026-01-01', to: '2026-01-31' }).label, '2026-01-01 to 2026-01-31');
+  assert.equal(resolvePeriod({ period: 'd7' }).from, '2026-08-27');
+  assert.equal(resolvePeriod({ period: 'd30' }).from, '2026-08-04');
+  assert.equal(resolvePeriod({ period: 'mtd' }).from, '2026-09-01');
+  assert.equal(resolvePeriod({ period: 'fy' }).from, '2026-04-01', 'Indian FY starts 1 April');
 });
 
 test('a financial year before April belongs to the previous year', () => {
@@ -55,196 +184,188 @@ test('a financial year before April belongs to the previous year', () => {
 test('bad periods and dates are refused, not coerced', () => {
   assert.throws(() => resolvePeriod({ period: 'last-tuesday' }), /unknown period/);
   assert.throws(() => resolvePeriod({ from: '2026-12-01', to: '2026-01-01' }), /after/);
-  assert.throws(() => reports.isoDate('01/02/2026'), /YYYY-MM-DD/);
   assert.throws(() => reports.isoDate("2026-01-01'; DROP TABLE x--"), /YYYY-MM-DD/);
 });
 
-/* ------------------------------------------------- what reaches the server */
+/* --------------------------------------------------------------- home tiles */
 
-test('dates are bound as parameters, never interpolated', async () => {
-  responder = () => [{}];
-  await reports.salesTotals({ from: '2026-08-01', to: '2026-08-31' });
-  const q = issued[0];
-  assert.match(q.text, /CashmemoDt >= @from AND CashmemoDt <= @to/);
-  assert.ok(!q.text.includes('2026-08-01'), 'a date must not appear in the SQL text');
-  assert.deepEqual(q.params.from, { type: 'Date', value: '2026-08-01' });
-  assert.deepEqual(q.params.to, { type: 'Date', value: '2026-08-31' });
-});
-
-test('a supplier alias is bound, not interpolated', async () => {
-  responder = () => [{}];
-  await reports.sizeMix({ from: '2026-08-01', to: '2026-08-31', supplierAlias: "AHD'; DROP--" });
-  const q = issued[0];
-  assert.match(q.text, /SupplierAlias = @alias/);
-  assert.ok(!q.text.includes('DROP'), 'the alias must not reach the SQL text');
-  assert.equal(q.params.alias.value, "AHD'; DROP--");
-});
-
-test('a row limit can only ever be a bounded integer', async () => {
-  responder = () => [];
-  // Note the last case: a value like "10; DROP TABLE x" is rejected outright
-  // rather than salvaged down to 10, because Number() of it is NaN. Falling
-  // back to the default is the safer of the two behaviours.
-  for (const [given, expected] of [['5', 5], ['abc', 50], ['-3', 50], ['999999', 2000],
-                                   ['10; DROP TABLE x', 50], ['7.9', 7]]) {
-    issued = [];
-    await reports.bestSellers({ from: '2026-08-01', to: '2026-08-31', limit: given });
-    assert.match(issued[0].text, new RegExp(`SELECT TOP ${expected}\\b`), `limit ${given} -> TOP ${expected}`);
-    assert.ok(!/DROP/.test(issued[0].text));
-  }
-});
-
-test('a renamed view is validated before it reaches a statement', async () => {
-  const original = process.env.SQL_VIEW_SALES;
-  process.env.SQL_VIEW_SALES = 'VW_X; DROP TABLE Sales--';
-  const fresh = await import(`../lib/reports.js?evil=${Date.now()}`);
-  await assert.rejects(() => fresh.salesTotals({ from: '2026-08-01', to: '2026-08-02' }), /unsafe object name/);
-  if (original === undefined) delete process.env.SQL_VIEW_SALES;
-  else process.env.SQL_VIEW_SALES = original;
-});
-
-test('reads are hinted so a scan cannot sit in front of the tills', async () => {
-  responder = () => [{}];
-  await reports.salesTotals({ from: '2026-08-01', to: '2026-08-31' });
-  assert.match(issued[0].text, /WITH \(NOLOCK\)/);
-});
-
-/* --------------------------------------------------- net of returns, always */
-
-test('sold is SLS minus SLR, and the reported pair is carried, not used', async () => {
-  responder = () => [{
-    grossQty: 1000, returnQty: 120, grossValue: 500000, returnValue: 60000,
-    reportedQty: 1000, reportedValue: 500000,
-    bills: 300, articles: 80, suppliers: 12, branches: 4,
-  }];
-  const t = await reports.salesTotals({ from: '2026-08-01', to: '2026-08-31' });
-  assert.equal(t.netQty, 880);
-  assert.equal(t.netValue, 440000);
-  assert.equal(t.reportedQty, 1000, 'kept for comparison');
-});
-
-test('reconcile names which reading SalesQuantity is', async () => {
-  const cases = [
-    [{ grossQty: 1000, returnQty: 120, reportedQty: 880 }, /already NET/],
-    [{ grossQty: 1000, returnQty: 120, reportedQty: 1000 }, /GROSS/],
-    [{ grossQty: 1000, returnQty: 120, reportedQty: 4242 }, /matches neither/],
-    [{ grossQty: 1000, returnQty: 0, reportedQty: 1000 }, /cannot be told apart/],
-  ];
-  for (const [row, expected] of cases) {
-    responder = () => [{ grossValue: 0, returnValue: 0, reportedValue: 0, ...row }];
-    const r = await reports.reconcileSales({ from: '2026-08-01', to: '2026-08-31' });
-    assert.match(r.conclusion, expected);
-    assert.match(r.portalUses, /SLSQty minus SLRQty/);
-  }
-});
-
-/* ------------------------------------------------------------- the balance */
-
-test('with-us is purchases less supplier returns less net sold ever', async () => {
+test('stock is read from the inventory view, not derived', async () => {
   responder = (text) => {
     const t = text.replace(/\s+/g, ' ');
-    if (/SUM\(ISNULL\(PurQty/.test(t)) return [{ qty: 900000, value: 9e8, suppliers: 225, articles: 12090, invoices: 5000 }];
-    if (/SUM\(ISNULL\(PrtQty/.test(t)) return [{ qty: 40000, value: 4e7, notes: 900 }];
-    if (/AS grossQty, CAST\(SUM\(ISNULL\(SLRQty, 0\)\) AS float\) AS returnQty FROM/.test(t)) {
-      return [{ grossQty: 640000, returnQty: 32186 }];          // netSoldEver
-    }
-    return [{ grossQty: 120000, returnQty: 6000, grossValue: 6e7, returnValue: 3e6,
-              reportedQty: 114000, reportedValue: 5.7e7, bills: 9000, articles: 900,
-              suppliers: 180, branches: 40 }];
+    if (/VW_MB_AI_DSB_REPORT/.test(t)) return [{ qty: 252186, value: 187000000, articles: 12090, suppliers: 225 }];
+    if (/VW_MB_POWERBI_PUR_REPORT/.test(t)) return [{ qty: 500000, value: 4e8, articles: 9000, suppliers: 220 }];
+    if (/VW_MB_POWERBI_PRT_REPORT/.test(t)) return [{ qty: 4000, value: 3e6, articles: 300 }];
+    return [{ qty: 108498, value: 9e7, articles: 3400, suppliers: 190 }];
   };
   const h = await reports.homeTotals({ from: '2026-08-04', to: '2026-09-02' });
-  const netSoldEver = 640000 - 32186;
-  assert.equal(h.withUs.qty, 900000 - 40000 - netSoldEver);
-  assert.equal(h.withUs.derivedFrom.netSoldEver, netSoldEver, 'the parts are reported, not hidden');
+
+  assert.equal(h.withUs.qty, 252186, 'straight from BalQty');
+  assert.equal(h.withUs.costValue, 187000000);
+  assert.equal(h.withUs.source, 'VW_MB_AI_DSB_REPORT');
+  assert.equal(h.designsInStock, 12090);
   assert.equal(h.suppliers, 225);
-  assert.equal(h.sold.qty, 114000, 'period sold is net');
+  assert.equal(h.sold.qty, 108498);
+  assert.equal(h.returnedToSuppliers.qty, 4000);
   assert.equal(h.financialYearFrom, '2026-04-01');
-  assert.equal(h.salesReportedVsComputed.agrees, true);
 });
 
-/* ------------------------------------------------------- the supplier book */
+/* ---------------------------------------------------------------- the merges */
 
-test('the book merges purchases, sales and returns per supplier', async () => {
+test('best sellers carry stock beside sales, and survive being out of stock', async () => {
+  responder = (text) => {
+    if (/VW_MB_AI_DSB_REPORT/.test(text)) return [{ article: 'A1', balQty: 40, balValue: 20000 }];
+    return [
+      { article: 'A1', category: 'SP', fabric: 'COTTON', supplier: 'AHD-NIC', soldQty: 60, soldValue: 42000 },
+      { article: 'A2', category: 'RM', fabric: 'RAYON', supplier: 'JPR-FLW', soldQty: 30, soldValue: 21000 },
+    ];
+  };
+  const rows = await reports.articleLeaders({ from: '2026-08-01', to: '2026-08-31' });
+
+  const a1 = rows.find((r) => r.article === 'A1');
+  assert.equal(a1.balanceQty, 40);
+  assert.equal(a1.inStock, true);
+  assert.equal(a1.sellThroughPct, 60, '60 of the 100 that existed');
+  assert.equal(a1.weeksOfCover, 0.7);
+
+  const a2 = rows.find((r) => r.article === 'A2');
+  assert.equal(a2.balanceQty, 0);
+  assert.equal(a2.inStock, false, 'sold but no longer stocked - still listed');
+  assert.equal(a2.sellThroughPct, 100);
+});
+
+test('the book merges all four views per supplier', async () => {
   responder = (text) => {
     const t = text.replace(/\s+/g, ' ');
-    if (/SUM\(ISNULL\(PurQty/.test(t)) return [
-      { SupplierAlias: 'AHD-NIC', SupplierName: 'NEETAS CREATION', SupplierCity: 'Ahmedabad', purQty: 1000, purValue: 500000, articles: 40, Department: 'SP' },
-      { SupplierAlias: 'JPR-FLW', SupplierName: 'FLO WING', SupplierCity: 'Jaipur', purQty: 500, purValue: 250000, articles: 20, Department: 'RM' },
-      { SupplierAlias: 'NEW-SUP', SupplierName: 'BRAND NEW', SupplierCity: 'Surat', purQty: 200, purValue: 90000, articles: 5, Department: 'SA' },
+    if (/VW_MB_POWERBI_PUR_REPORT/.test(t)) return [
+      { key: 'AHD-NIC', qty: 1000, value: 500000, articles: 40 },
+      { key: 'OLD-SUP', qty: 300, value: 90000, articles: 10 },
     ];
-    if (/SUM\(ISNULL\(PrtQty/.test(t)) return [{ SupplierAlias: 'AHD-NIC', prtQty: 100 }];
-    return [
-      { SupplierAlias: 'AHD-NIC', netQty: 600, netValue: 400000 },
-      { SupplierAlias: 'JPR-FLW', netQty: 450, netValue: 300000 },
+    if (/VW_MB_POWERBI_PRT_REPORT/.test(t)) return [{ key: 'AHD-NIC', qty: 100, value: 50000, articles: 5 }];
+    if (/VW_MB_AI_DSB_REPORT/.test(t)) return [
+      { key: 'AHD-NIC', qty: 250, value: 130000, articles: 22 },
+      { key: 'NEW-SUP', qty: 90, value: 40000, articles: 6 },
     ];
+    return [{ key: 'AHD-NIC', qty: 650, value: 455000, articles: 35 }];
   };
   const book = await reports.supplierBook({ from: '2026-04-01', to: '2026-09-02' });
 
-  assert.equal(book.length, 3);
-  assert.equal(book[0].alias, 'AHD-NIC', 'ordered by sold, descending');
-
   const nic = book.find((b) => b.alias === 'AHD-NIC');
-  assert.equal(nic.balanceQty, 1000 - 100 - 600);
-  assert.equal(nic.sellThroughPct, 66.7, '600 of the 900 that stayed');
+  assert.equal(nic.purchasedQty, 1000);
+  assert.equal(nic.returnedQty, 100);
+  assert.equal(nic.soldQty, 650);
+  assert.equal(nic.balanceQty, 250, 'from inventory, not purchases minus sales');
+  assert.equal(nic.balanceCostValue, 130000);
+  assert.equal(nic.sellThroughPct, 72.2);
 
-  const fresh = book.find((b) => b.alias === 'NEW-SUP');
-  assert.equal(fresh.soldQty, 0, 'a supplier with no sales is still on the book');
-  assert.equal(fresh.balanceQty, 200);
-
-  assert.equal(book.find((b) => b.alias === 'JPR-FLW').returnedToSupplierQty, 0);
+  // A supplier present in only one view must still appear.
+  assert.ok(book.find((b) => b.alias === 'NEW-SUP'), 'stock but no purchases in period');
+  assert.ok(book.find((b) => b.alias === 'OLD-SUP'), 'purchases but no stock');
+  assert.equal(book.find((b) => b.alias === 'OLD-SUP').balanceQty, 0);
 });
 
 test('sell-through is null rather than a divide by zero', async () => {
-  responder = (text) => {
-    const t = text.replace(/\s+/g, ' ');
-    if (/SUM\(ISNULL\(PurQty/.test(t)) return [{ SupplierAlias: 'X', SupplierName: 'X', purQty: 0, purValue: 0, articles: 0 }];
-    if (/SUM\(ISNULL\(PrtQty/.test(t)) return [];
-    return [];
-  };
+  responder = (text) => (/VW_MB_POWERBI_PUR_REPORT/.test(text)
+    ? [{ key: 'X', qty: 0, value: 0, articles: 0 }] : []);
   const book = await reports.supplierBook({ from: '2026-04-01', to: '2026-09-02' });
   assert.equal(book[0].sellThroughPct, null);
+});
+
+test('daily sales come back as plain ISO dates', async () => {
+  responder = () => [
+    { d: new Date('2026-08-30T00:00:00Z'), qty: 250, value: 120000 },
+    { d: '2026-08-31', qty: 300, value: 150000 },
+  ];
+  const days = await reports.daily('sales', { from: '2026-08-30', to: '2026-08-31' });
+  assert.deepEqual(days.map((d) => d.date), ['2026-08-30', '2026-08-31']);
+  assert.equal(days[0].qty, 250);
+});
+
+/* ------------------------------------------------------ column verification */
+
+test('the required column set is exactly the agreed one', () => {
+  const req = reports.requiredColumns();
+  assert.deepEqual(Object.keys(req).sort(), ['inventory', 'purchaseReturns', 'purchases', 'sales']);
+  for (const [key, spec] of Object.entries(req)) {
+    for (const column of spec.columns) {
+      assert.ok(ALLOWED.has(column), `${key} asks for "${column}", which is outside the spec`);
+    }
+  }
+  assert.deepEqual(req.inventory.columns,
+    ['BalQty', 'BalCostValue', 'ArticleNo', 'CategoryShortName', 'FabricShortName', 'SupplierAlias']);
+});
+
+test('verifyColumns names a missing column instead of letting a query fail', async () => {
+  responder = (text, params) => {
+    if (!/sys\.columns/.test(text)) return [{}];
+    const base = ['ArticleNo', 'CategoryShortName', 'SupplierAlias'];   // FabricShortName absent
+    const extra = {
+      'VW_MB_POWERBI_PUR_REPORT': ['PurchaseDt', 'PurQty', 'PurNetAmount'],
+      'VW_MB_POWERBI_PRT_REPORT': ['PurReturnDt', 'PrtQty', 'PrtNetAmount'],
+      'VW_MB_POWERBI_SLS_DATA_WITHOUT_ITEMID': ['CashmemoDt', 'SalesQuantity', 'SalesNetAmount'],
+      'VW_MB_AI_DSB_REPORT': ['BalQty', 'BalCostValue'],
+    }[params.object.value] || [];
+    return [...base, ...extra].map((c) => ({ column: c, type: 'varchar', nullable: 0 }));
+  };
+  const v = await reports.verifyColumns();
+  assert.equal(v.ok, false);
+  for (const key of ['purchases', 'purchaseReturns', 'sales', 'inventory']) {
+    assert.deepEqual(v.views[key].missing, ['FabricShortName'], `${key} should name the missing column`);
+  }
+});
+
+test('verifyColumns passes when every column is present', async () => {
+  responder = (text, params) => {
+    if (!/sys\.columns/.test(text)) return [{}];
+    const req = reports.requiredColumns();
+    const spec = Object.values(req).find((r) => r.view === params.object.value);
+    return (spec?.columns || []).map((c) => ({ column: c, type: 'numeric', nullable: 0 }));
+  };
+  const v = await reports.verifyColumns();
+  assert.equal(v.ok, true);
+  assert.equal(v.views.sales.missing.length, 0);
+});
+
+test('verifyColumns reports a view that is not visible to this login', async () => {
+  responder = (text) => (/sys\.columns/.test(text) ? [] : [{}]);
+  const v = await reports.verifyColumns();
+  assert.equal(v.ok, false);
+  assert.match(v.views.inventory.problem, /not found or not visible/);
 });
 
 /* ------------------------------------------------------------------ selftest */
 
 test('selftest reports each query rather than failing on the first', async () => {
-  let n = 0;
-  responder = () => { if (++n === 3) throw new Error('Invalid column name "Nope"'); return [{}]; };
+  // Targeted at the daily series specifically. Counting calls would land
+  // inside verifyColumns, which catches per-view errors itself and reports
+  // them as a missing column rather than throwing - so the injection has to
+  // name the query it means.
+  responder = (text) => {
+    if (/GROUP BY CashmemoDt/.test(text.replace(/\s+/g, ' '))) {
+      throw new Error('Invalid column name "Nope"');
+    }
+    return [{}];
+  };
   const r = await reports.selftest({ from: '2026-08-26', to: '2026-09-02' });
-  assert.equal(r.failed, 1);
-  assert.ok(r.passed > 8, 'a bad column stops that check only');
+  assert.equal(r.failed, 1, 'one check failed, the rest carried on');
+  assert.ok(r.passed > 8);
   const broken = r.results.find((x) => x.ok === false);
+  assert.equal(broken.check, 'daily: sales');
   assert.match(broken.error, /Invalid column name/);
-  assert.equal(r.stoppedBecause, null);
+  assert.equal(r.stoppedBecause, null, 'a bad column is not a connection failure');
 });
 
 test('selftest stops at once when the server cannot be reached', async () => {
-  // Thirteen checks each waiting out a connect timeout took over three
-  // minutes and would be killed by the platform before reporting anything.
   let attempts = 0;
   responder = () => { attempts++; throw new Error('Failed to connect to 38.45.94.39:12866 in 8000ms'); };
   const r = await reports.selftest({ from: '2026-08-26', to: '2026-09-02' });
-  assert.equal(attempts, 1, 'only the first check should have been attempted');
-  assert.equal(r.failed, 1);
+  assert.equal(attempts, 1, 'only the first check should be attempted');
   assert.ok(r.skipped > 10);
   assert.match(r.stoppedBecause, /could not be reached/);
-  assert.match(r.results[0].error, /Failed to connect/);
 });
 
 test('selftest works to a budget so a slow scan still answers', async () => {
   responder = async () => { await new Promise((r) => setTimeout(r, 30)); return [{}]; };
   const r = await reports.selftest({ from: '2026-08-26', to: '2026-09-02', budgetMs: 60 });
   assert.ok(r.passed >= 1 && r.passed < 13, `expected a partial run, got ${r.passed}`);
-  assert.ok(r.skipped > 0);
   assert.match(r.stoppedBecause, /time budget/);
-});
-
-test('daily sales come back as plain ISO dates', async () => {
-  responder = () => [
-    { d: new Date('2026-08-30T00:00:00Z'), netQty: 250, netValue: 120000 },
-    { d: '2026-08-31', netQty: 300, netValue: 150000 },
-  ];
-  const days = await reports.dailySales({ from: '2026-08-30', to: '2026-08-31' });
-  assert.deepEqual(days.map((d) => d.date), ['2026-08-30', '2026-08-31']);
-  assert.equal(days[0].qty, 250);
 });

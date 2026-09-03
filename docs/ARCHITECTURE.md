@@ -98,6 +98,56 @@ the SPA. `scripts/check-sqlserver.mjs --dump` and
 `scripts/dump-sqlserver-schema.ps1` exist to capture the schema so the
 reporting endpoints can be written against real tables.
 
+## The reporting views
+
+Four views in zRetailHQ0, one shared grain. `lib/reports.js` builds every
+query from these declarations rather than from hand-written SQL, so the set of
+columns this app depends on is stated once and nothing can quietly reach for a
+column that was not agreed.
+
+| View | Purpose | Date | Measures |
+|---|---|---|---|
+| `VW_MB_POWERBI_PUR_REPORT` | purchases | `PurchaseDt` | `PurQty`, `PurNetAmount` |
+| `VW_MB_POWERBI_PRT_REPORT` | purchase returns | `PurReturnDt` | `PrtQty`, `PrtNetAmount` |
+| `VW_MB_POWERBI_SLS_DATA_WITHOUT_ITEMID` | sales | `CashmemoDt` | `SalesQuantity`, `SalesNetAmount` |
+| `VW_MB_AI_DSB_REPORT` | inventory | none | `BalQty`, `BalCostValue` |
+
+Shared dimensions, and the only ones any query may group by: `ArticleNo`,
+`CategoryShortName`, `FabricShortName`, `SupplierAlias`.
+
+**Stock is read, not derived.** An earlier version computed it as purchased
+minus supplier returns minus sold-ever, because no stock source had been
+identified. That was only ever as good as the views' history was complete.
+`BalQty` is the real figure and replaces it.
+
+**Sales use `SalesQuantity`.** The sales view also carries `SLSQty`/`SLRQty`,
+and an earlier version computed net as the difference because it was not known
+whether `SalesQuantity` was gross or net. The agreed column is
+`SalesQuantity`, so that is what is read and the pair is not touched.
+
+**Columns are verified, not assumed.** Two different column lists have been
+supplied for these same views, so `GET /api/reports/columns` reads what the
+server actually has and names anything missing - a clear answer instead of
+`Invalid column name` surfacing from a query. `verifyColumns()` also runs as
+part of `/api/reports/selftest`.
+
+Reads use `READ UNCOMMITTED` unless `SQL_NOLOCK=false`: this is a live retail
+database and a scan holding locks would sit in front of the tills. The cost is
+that a figure can move by whatever is mid-transaction at that instant.
+
+### Endpoints
+
+| Path | What |
+|---|---|
+| `/api/reports/home` | the home tiles: sold, purchased, returned, in stock |
+| `/api/reports/best-sellers` | articles by sales, with stock and cover beside each |
+| `/api/reports/daily?of=sales` | a daily series for any dated view |
+| `/api/reports/book` | every supplier across all four views |
+| `/api/reports/supplier?alias=X` | one supplier in detail |
+| `/api/reports/breakdown?by=category&of=sales` | any view by any of the four dimensions |
+| `/api/reports/columns` | what the app reads vs what the server has |
+| `/api/reports/selftest` | every query run once, with timings |
+
 ## What is still hard-coded in the SPA
 
 Fifteen constants, all in `assets/MB-Buyers-Portal.html`, each a candidate for
