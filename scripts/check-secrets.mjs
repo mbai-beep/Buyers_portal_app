@@ -12,6 +12,7 @@
  *   node scripts/check-secrets.mjs --history  # every commit, slower
  */
 import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 
 const mode = process.argv.includes('--history') ? 'history'
            : process.argv.includes('--all') ? 'all'
@@ -71,9 +72,28 @@ function listFiles() {
   return out.split('\n').filter(Boolean);
 }
 
+/**
+ * Reading HEAD in --all mode silently skipped files added since the last
+ * commit - exactly the files most likely to be carrying a freshly pasted
+ * credential. Read the index first, then the working tree, and only then
+ * HEAD; a file that cannot be read at all is reported rather than passed.
+ */
+const unreadable = [];
+
 function contentOf(file) {
-  try { return git('show', mode === 'staged' ? `:${file}` : `HEAD:${file}`); }
-  catch { return ''; }
+  // --all means "what is on disk right now", so the working tree comes first;
+  // reading the index first returned the committed copy and a token pasted
+  // into a tracked file went unnoticed. --staged means exactly the index.
+  for (const attempt of mode === 'staged'
+    ? [() => git('show', `:${file}`)]
+    : [() => readFileSync(file, 'utf8'), () => git('show', `:${file}`), () => git('show', `HEAD:${file}`)]) {
+    try {
+      const text = attempt();
+      if (typeof text === 'string') return text;
+    } catch { /* try the next source */ }
+  }
+  unreadable.push(file);
+  return '';
 }
 
 if (mode === 'history') {
@@ -94,6 +114,12 @@ if (mode === 'history') {
   }
 } else {
   for (const file of listFiles()) scan(file, contentOf(file));
+}
+
+if (unreadable.length) {
+  console.error(`check-secrets: could not read ${unreadable.length} file(s), so they were NOT scanned:`);
+  for (const f of unreadable.slice(0, 20)) console.error(`  ${f}`);
+  process.exit(1);
 }
 
 if (!findings.length) {
