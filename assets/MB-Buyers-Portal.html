@@ -200,6 +200,17 @@ h2:not(:first-child){margin-top:38px}
 .databanner .dbi{flex:none;font-size:14px;line-height:1.2}
 .databanner .dbx{flex:1;min-width:0}
 
+.samplenote{display:flex;gap:9px;align-items:flex-start;padding:10px 13px;margin:0 0 10px;
+  border-radius:12px;background:var(--mb-midsoft);border:1px solid var(--mb-mid);
+  color:var(--mb-ink);font-size:12px;line-height:1.45}
+.samplenote b{font-weight:700}
+.samplenote .sni{flex:none;font-size:13px}
+.supsearch{width:100%;font:inherit;font-size:14px;padding:11px 13px;margin:0 0 10px;
+  border:1px solid var(--mb-line);border-radius:12px;background:var(--mb-card);color:var(--mb-ink)}
+.posaved{padding:12px 14px;margin:0 0 10px;border-radius:12px;background:var(--mb-oksoft);
+  border:1px solid var(--mb-ok);color:var(--mb-ok);font-size:12.5px;line-height:1.5}
+.posaved b{font-weight:700;display:block;margin-bottom:2px}
+
 /* The home tiles read zRetailHQ0. These two say so while it is happening, and
    say plainly when it failed - the tiles show a dash rather than a stale or
    invented number. */
@@ -2260,11 +2271,18 @@ function newPONumber(alias){
   return 'PO-'+tag+'-'+next;
 }
 function startPO(alias){
-  poDraft={supplier:alias, no:newPONumber(alias), date:TODAY_ISO,
-           due:addDays(TODAY_ISO,21), terms:(V2[alias]&&V2[alias].acc&&V2[alias].acc.creditDays)||120,
+  /* Dates come from the real calendar: TODAY_ISO belongs to the sample data
+     and an order dated in the past would go to the supplier that way. The
+     order number is assigned by the server on save, so the one shown here is
+     only a placeholder. */
+  const today = liveToday();
+  const info = supInfo(alias);
+  poDraft={supplier:alias, no:'(assigned on send)', date:today,
+           due:addDays(today,21), terms:info.creditDays,
            lines:[], note:''};
-  capture=null;
+  capture=null; poSave={status:'idle', order:null, error:null, sheet:null};
 }
+let poSave={status:'idle', order:null, error:null, sheet:null};
 function addDays(iso,n){
   const d=new Date(iso+'T00:00:00Z'); d.setUTCDate(d.getUTCDate()+n);
   return d.toISOString().slice(0,10);
@@ -2487,9 +2505,9 @@ function poLines(editable){
   return '<div class="oflines">'+poDraft.lines.map(function(L,i){
     const q=lineQty(L), nc=L.colours.length||1;
     return '<div class="ofl">'+
-      (L.pics.length
-        ? '<span class="ofpic"><img src="'+L.pics[0]+'" alt="">'+
-          (L.pics.length>1?'<u>+'+(L.pics.length-1)+'</u>':'')+'</span>'
+      ((L.pics||[]).length
+        ? '<span class="ofpic"><img src="'+(L.pics||[])[0]+'" alt="">'+
+          ((L.pics||[]).length>1?'<u>+'+((L.pics||[]).length-1)+'</u>':'')+'</span>'
         : '<span class="ofpic np">no<br>photo</span>')+
       '<div class="ofb"><b>'+L.design+(L.cat?' · '+L.cat:'')+'</b>'+
         '<span class="ofc">'+(L.colours.length
@@ -2506,7 +2524,7 @@ function poLines(editable){
 
 function poView(){
   if(!poDraft || !poDraft.lines.length){ view='newpo'; return newPOView(); }
-  const alias=poDraft.supplier, v=D[alias];
+  const alias=poDraft.supplier, info=supInfo(alias), v=D[alias]||{vendor:info.vendor, city:info.city};
   const team=(V2[alias]&&V2[alias].team)||[];
   return backBtn('newpo','Back to the designs')+
     '<div class="sample"><span style="font-size:15px">⚠</span><span><b>Not raised yet</b>'+
@@ -2530,67 +2548,133 @@ function poView(){
         '<textarea id="ponote" placeholder="Packing, labelling, a colour to confirm first" '+
         'oninput="poDraft.note=this.value">'+(poDraft.note||'')+'</textarea></label>'+
     '</div>'+
+    (poSave.status==='error'
+      ? '<div class="livebad"><b>The order was not saved.</b> '+
+        String(poSave.error||'').replace(/</g,'&lt;')+
+        ' <button onclick="sendPO()">Try again</button></div>'
+      : '')+
     '<div class="acts" style="display:flex;gap:8px;margin-top:14px">'+
-      '<button onclick="go(\'newpo\')">Keep editing</button>'+
-      '<button class="p" onclick="sendPO()">Send it to '+T(v.vendor).split(' ')[0]+'</button></div>'+
-    '<span class="rnote">It lands on their phone as an open order, with these pictures. '+
-      'They can accept it, ask for more time, or tell you they cannot make it — and every one of '+
-      'those comes back to your desk.</span>';
+      '<button onclick="go(\'newpo\')"'+(poSave.status==='saving'?' disabled':'')+'>Keep editing</button>'+
+      '<button class="p" onclick="sendPO()"'+(poSave.status==='saving'?' disabled':'')+'>'+
+        (poSave.status==='saving'?'Raising the order&hellip;':'Raise this order')+'</button></div>'+
+    '<span class="rnote">Raising it records the order against '+alias+' with your name on it, '+
+      'and copies it to the Google Sheet. Nothing is sent to the supplier from here yet \u2014 '+
+      'that is a separate step and does not exist in this build.</span>';
 }
 
-window.sendPO=function(){
-  const alias=poDraft.supplier, v=D[alias];
-  lastPO=JSON.parse(JSON.stringify(poDraft));
-  // it becomes a real open order on the supplier's side
-  PO[alias]=PO[alias]||{rows:[],pending:0,value:0};
+window.sendPO=async function(){
+  if(!poDraft || !poDraft.lines.length) return;
+  if(poSave.status==='saving') return;
+
+  /* One row per size, which is the grain the sheet and the order lines table
+     both want. A line with no size breakdown sends its whole quantity once. */
+  const lines=[];
   poDraft.lines.forEach(function(L){
-    const nc=L.colours.length||1, q=lineQty(L)*nc;
-    PO[alias].rows.push({po:poDraft.no, dt:poDraft.date, due:poDraft.due,
-      short:L.design, colour:(L.colours[0]||'ASSORTED'), ordered:q, delivered:0,
-      pending:q, rate:L.rate, value:q*L.rate,
-      sizes:SIZE_ORDER.filter(k=>L.sizes[k]).map(k=>({size:k,qty:L.sizes[k]*nc}))});
+    const colours = (L.colours&&L.colours.length)?L.colours:[null];
+    const sizes = Object.keys(L.sizes||{}).filter(k=>L.sizes[k]>0);
+    colours.forEach(function(c){
+      if(sizes.length){
+        sizes.forEach(function(k){
+          lines.push({articleNo:L.design, colour:c, sizeName:k, qty:L.sizes[k], rate:L.rate});
+        });
+      } else {
+        lines.push({articleNo:L.design, colour:c, sizeName:null, qty:L.qty||0, rate:L.rate});
+      }
+    });
   });
-  INBOX.unshift({id:'P'+INBOX.length, alias:alias, kind:'sent', title:'Purchase order sent',
-    body:poDraft.no+' — '+n0(poDraft.lines.length)+' designs, '+n0(poQty())+' pieces, '+money(poVal())+
-      '. Wanted by '+pretty(poDraft.due)+'.', meta:{}, at:TODAY_ISO, state:'done'});
-  const n=poQty(), val=poVal(), no=poDraft.no;
-  poDraft=null; capture=null; heardText='';
-  view='orders'; paint();
-  alertBar(no+' sent to '+T(v.vendor)+' — '+n0(n)+' pieces, '+money(val)+'.');
+
+  poSave={status:'saving', order:null, error:null, sheet:null}; paint();
+
+  try{
+    const res = await fetch('/api/orders/create',{
+      method:'POST', credentials:'same-origin',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        supplierAlias: poDraft.supplier,
+        orderDate: poDraft.date,
+        wantedBy: poDraft.due,
+        termsDays: poDraft.terms,
+        note: poDraft.note||'',
+        lines: lines
+      })
+    });
+    if(res.status===401){ location.href='/login?next=%2Fportal'; return; }
+    const data = await res.json().catch(()=>({}));
+    if(res.status!==201 || !data.ok){
+      poSave={status:'error', order:null, sheet:null,
+              error:(data.problems&&data.problems.join('; '))||data.detail||data.message||('HTTP '+res.status)};
+      paint(); return;
+    }
+    poSave={status:'saved', order:data.order, sheet:data.sheet, error:null};
+    lastPO=JSON.parse(JSON.stringify(poDraft));
+    lastPO.no=data.order.orderNo;
+    poDraft=null;
+    view='posaved';
+    paint();
+  }catch(e){
+    poSave={status:'error', order:null, sheet:null, error:'No response from the server.'};
+    paint();
+  }
 };
 
-function pickSupplier(){
-  return backBtn('home')+
-    '<div class="colhd">Who are you buying from</div>'+
-    '<div class="suplist">'+SUPPLIERS.map(function(k){
-      const v=D[k], s=v.summary, a=V2[k]&&V2[k].acc;
-      return '<button class="supr" onclick="startPO(\''+k+'\');paint()">'+
-        '<span class="supav" style="background:'+sw(v.vendor)+'">'+initials(v.vendor)+'</span>'+
-        '<span class="supb"><b>'+T(v.vendor)+'</b>'+
-          '<span>'+k+' · '+T(v.city)+' · '+n0(s.articles)+' designs</span></span>'+
-        '<span class="supf">'+(a?a.creditDays+'d':'')+'</span></button>';
-    }).join('')+'</div>'+
-    '<span class="rnote">Three suppliers here so the screen can be judged. The live build opens '+
-      'on your own book of suppliers, searchable.</span>';
+function poSavedView(){
+  const o=poSave.order||{}, sh=poSave.sheet||{};
+  const sheetLine = sh.ok
+    ? (sh.skipped ? 'Google Sheets is not configured, so nothing was mirrored to it.'
+                  : 'Written to the Google Sheet as well.')
+    : 'The Google Sheet could not be written \u2014 the order is safe and will be retried. ('+
+      String(sh.error||'').replace(/</g,'&lt;')+')';
+  return backBtn('buy','Back to Purchase')+
+    '<div class="posaved"><b>Order '+(o.orderNo||'')+' raised</b>'+
+      n0(o.total_qty||0)+' pieces to '+(o.supplier_alias||'')+
+      ', wanted by '+pretty(o.wanted_by||o.order_date||'')+'. '+
+      'Saved by '+(o.raised_by_name||o.raised_by||'')+'.<br>'+sheetLine+'</div>'+
+    '<div class="rowlist">'+
+      '<button class="row" onclick="go(\'polist\')"><span class="rowt"><b>See raised orders</b>'+
+        '<span>Everything raised in the portal</span></span><span class="rowa">&rsaquo;</span></button>'+
+      '<button class="row" onclick="go(\'newpo\')"><span class="rowt"><b>Raise another</b>'+
+        '<span>Pick a supplier and start again</span></span><span class="rowa">&rsaquo;</span></button>'+
+    '</div>';
 }
 
+let supPick='';
+window.setSupPick=function(v){ supPick=v; paint(); };
 
-/* ============================================================ TODAY
-   The redesign, 1 Sep 2026.
+function pickSupplier(){
+  const B = MBBOOK;
+  if(B.status==='idle'){ setTimeout(()=>loadBook(),0); }
 
-   What was here before was a dashboard: fourteen tiles down one column, every
-   one of them a number. A dashboard makes the buyer find the decision. But Anu's
-   own account of the problem is not that buyers lack numbers — they have raw ERP
-   reports already — it is that "buyers miss most of the facts", that "many
-   opportunities are missed", and that 1,043 articles sold out with nobody told
-   to repeat them while 2,119 sat with no sale at all.
+  const head = backBtn('home')+'<div class="colhd">Who are you buying from</div>';
 
-   Those are not reporting failures. They are decisions nobody was handed.
+  if(B.status==='error'){
+    return head+'<div class="livebad"><b>Your suppliers could not be loaded.</b> '+
+      String(B.error||'').replace(/</g,'&lt;')+
+      ' <button onclick="loadBook(true)">Try again</button></div>';
+  }
+  if(B.status!=='ok') return head+'<div class="livewait">Reading your book of suppliers&hellip;</div>';
 
-   So the home screen is a QUEUE, not a dashboard. Five kinds of decision, each
-   card carrying the one number that makes it a decision and one button that
-   acts on it, ranked by what is at stake. The numbers still exist — they moved
-   to the Book tab, where you go when you want to look rather than be told.     */
+  const q = supPick.trim().toUpperCase();
+  const all = B.suppliers||[];
+  const list = q ? all.filter(x=>String(x.alias).toUpperCase().indexOf(q)>=0) : all;
+
+  return head+
+    '<input class="supsearch" type="search" placeholder="Supplier code" value="'+
+      supPick.replace(/"/g,'&quot;')+'" oninput="setSupPick(this.value)">'+
+    (list.length
+      ? '<div class="suplist">'+list.slice(0,60).map(function(x){
+          return '<button class="supr" onclick="startPO(\''+x.alias+'\');paint()">'+
+            '<span class="supav" style="background:'+sw(x.alias)+'">'+initials(x.alias)+'</span>'+
+            '<span class="supb"><b>'+x.alias+'</b>'+
+              '<span>'+n0(x.soldQty)+' sold &middot; '+n0(x.balanceQty)+' in stock'+
+              (x.articlesInStock?' &middot; '+n0(x.articlesInStock)+' designs':'')+'</span></span>'+
+            '<span class="supf">&rsaquo;</span></button>';
+        }).join('')+'</div>'
+      : '<span class="rnote">No supplier code matches &ldquo;'+
+        supPick.replace(/</g,'&lt;')+'&rdquo;.</span>')+
+    (list.length>60 ? '<span class="rnote">First 60 of '+n0(list.length)+'. Keep typing to narrow it.</span>' : '')+
+    '<span class="rnote">Your own book, from zRetailHQ0. These views carry the supplier '+
+      'code but not the supplier name, so the code is what is shown.</span>';
+}
 
 function backBtn(to,lab){ return '<button class="back" onclick="go(\''+to+'\')">‹ '+(lab||'Back')+'</button>'; }
 
@@ -3360,6 +3444,59 @@ function liveRangeLabel(){
   return R.from===R.to ? pretty(R.from) : pretty(R.from)+' – '+pretty(R.to);
 }
 
+/* The book and the category split, from the same views as the tiles. Loaded
+   on demand rather than up front: they are two more scans of a live retail
+   database and most visits never open these screens. */
+const MBBOOK = { status:'idle', suppliers:null, categories:null, error:null, key:null };
+
+async function loadBook(force){
+  const R = liveRange();
+  const key = R.from+'..'+R.to;
+  if(!force && MBBOOK.key===key && (MBBOOK.status==='ok'||MBBOOK.status==='loading')) return;
+  MBBOOK.status='loading'; MBBOOK.error=null; MBBOOK.key=key;
+  MBBOOK.suppliers=null; MBBOOK.categories=null;
+  paint();
+  try{
+    const q = 'from='+R.from+'&to='+R.to;
+    const [b,c] = await Promise.all([
+      fetch('/api/reports/book?'+q+'&limit=1000',{credentials:'same-origin'}),
+      fetch('/api/reports/breakdown?by=category&of=sales&'+q+'&limit=60',{credentials:'same-origin'})
+    ]);
+    if(b.status===401||c.status===401){ location.href='/login?next=%2Fportal'; return; }
+    const bd = await b.json().catch(()=>({})), cd = await c.json().catch(()=>({}));
+    if(MBBOOK.key!==key) return;
+    if(!b.ok||!bd.ok){ MBBOOK.status='error'; MBBOOK.error=bd.detail||bd.message||('HTTP '+b.status); }
+    else {
+      MBBOOK.status='ok';
+      MBBOOK.suppliers=bd.suppliers||[];
+      MBBOOK.categories=(cd.ok?cd.rows:[])||[];
+    }
+  }catch(e){
+    if(MBBOOK.key!==key) return;
+    MBBOOK.status='error'; MBBOOK.error='No response from the server.';
+  }
+  paint();
+}
+window.loadBook=loadBook;
+
+/* What is known about a supplier. The live views carry SupplierAlias but no
+   supplier name, so for a supplier that is not one of the three the sample
+   data describes, the alias is the name - said rather than invented. */
+function supInfo(alias){
+  const v = D[alias];
+  if(v) return {vendor:v.vendor, city:v.city, creditDays:(V2[alias]&&V2[alias].acc&&V2[alias].acc.creditDays)||120, sample:true};
+  const b = (MBBOOK.suppliers||[]).find(x=>x.alias===alias);
+  return {vendor:alias, city:'', creditDays:120, sample:false, book:b||null};
+}
+
+/* A marker for a screen that is still running on the data built into this
+   file, so it cannot be mistaken for the live figures on the home tiles. */
+function sampleNotice(what){
+  return '<div class="samplenote"><span class="sni">&#9888;</span><span>'+
+    '<b>Sample data.</b> '+what+' is not read from zRetailHQ0 \u2014 these views have no '+
+    'source for it yet. Treat everything on this screen as illustrative.</span></div>';
+}
+
 let liveSeq = 0;
 async function loadLive(){
   const R = liveRange();
@@ -3414,6 +3551,7 @@ function paint(){
     view==='queue'     ? queueView()   :
     view==='newpo'     ? newPOView()   :
     view==='po'        ? poView()      :
+    view==='posaved'   ? poSavedView() :
     view==='dept'      ? deptView()    :
     view==='polist'    ? poListView()  :
     view==='approvals' ? approvalsView():
@@ -3579,71 +3717,55 @@ function poRowsAll(){
   });
   return out;
 }
-function poListView(){
-  let rows=poRowsAll();
-  if(polv) rows=rows.filter(r=>r.alias===polv);
-  if(polq){ const q=polq.toLowerCase();
-    rows=rows.filter(r=>String(r.po).toLowerCase().indexOf(q)>=0
-      || String(r.short).toLowerCase().indexOf(q)>=0
-      || D[r.alias].vendor.toLowerCase().indexOf(q)>=0); }
-  // one card per order number, not per line
-  const byPO={};
-  rows.forEach(function(r){
-    byPO[r.po]=byPO[r.po]||{po:r.po,alias:r.alias,dt:r.dt,due:r.due,lines:0,ord:0,left:0,val:0};
-    const g=byPO[r.po]; g.lines++; g.ord+=r.ordered; g.left+=r.left; g.val+=r.val;
-  });
-  const list=Object.keys(byPO).map(k=>byPO[k]).sort((a,b)=>a.due<b.due?-1:1);
-  return backBtn('home')+
-    '<div class="srch"><input type="search" placeholder="Order number, design or supplier" '+
-      'value="'+polq.replace(/"/g,'&quot;')+'" oninput="setPolQ(this.value)">'+
-      '<select onchange="setPolV(this.value)"><option value=""'+(polv?'':' selected')+
-        '>Every supplier</option>'+
-      SUPPLIERS.map(k=>'<option value="'+k+'"'+(polv===k?' selected':'')+'>'+
-        T(D[k].vendor)+' · '+k+'</option>').join('')+'</select></div>'+
-    '<span class="rnote">Orders are raised on the <b>supplier alias</b> — '+
-      T(D[SUPPLIERS[0]].vendor)+' is '+SUPPLIERS[0]+' — and the billing company sits underneath it. '+
-      'A supplier who bills through more than one company still has one alias here.</span>'+
-    '<div class="colhd">'+n0(list.length)+' order'+(list.length===1?'':'s')+'</div>'+
-    (list.length?list.map(function(g){
-      const v=D[g.alias], late=g.due<TODAY_ISO && g.left>0;
-      return '<button class="pocard'+(late?' late':'')+'" onclick="openPO(\''+g.po+'\')">'+
-        '<span class="pcl"><b>'+g.po+'</b><span>'+T(v.vendor)+' · '+g.alias+' · raised '+
-          pretty(g.dt)+'</span>'+
-          '<span class="pcm">'+n0(g.lines)+' line'+(g.lines>1?'s':'')+' · '+n0(g.ord)+' ordered · '+
-          '<em>'+n0(g.left)+' to come</em></span></span>'+
-        '<span class="pcr"><b>'+money(g.val)+'</b>'+
-          '<u class="'+(late?'bad':'')+'">'+(late?'was due ':'due ')+pretty(g.due)+'</u></span></button>';
-    }).join('')
-      :'<span class="rnote">No order matches that.</span>');
+const MBORDERS = { status:'idle', orders:null, error:null };
+async function loadOrders(force){
+  if(!force && (MBORDERS.status==='ok'||MBORDERS.status==='loading')) return;
+  MBORDERS.status='loading'; MBORDERS.error=null; paint();
+  try{
+    const res = await fetch('/api/orders?limit=200',{credentials:'same-origin'});
+    if(res.status===401){ location.href='/login?next=%2Fportal'; return; }
+    const d = await res.json().catch(()=>({}));
+    if(!res.ok||!d.ok){ MBORDERS.status='error'; MBORDERS.error=d.detail||d.message||('HTTP '+res.status); }
+    else { MBORDERS.status='ok'; MBORDERS.orders=d.orders||[]; }
+  }catch(e){ MBORDERS.status='error'; MBORDERS.error='No response from the server.'; }
+  paint();
 }
-window.openPO=function(po){
-  const rows=poRowsAll().filter(r=>r.po===po); if(!rows.length) return;
-  const v=D[rows[0].alias];
-  const el=document.getElementById('sheet'); el.className='sheet csheet on';
-  el.innerHTML='<h4>'+po+'</h4>'+
-    '<span class="sub2">'+T(v.vendor)+' · '+rows[0].alias+' · raised '+pretty(rows[0].dt)+
-      ' · due '+pretty(rows[0].due)+'</span>'+
-    '<div class="oflines">'+rows.map(function(r){
-      const p=picFor(r.alias,r.short);
-      return '<div class="ofl">'+
-        (p?'<span class="ofpic"><img src="'+p+'" alt=""></span>'
-          :'<span class="ofpic np">no<br>photo</span>')+
-        '<div class="ofb"><b>'+r.short+' · '+T(r.colour)+'</b>'+
-          '<span class="ofq">'+(r.sizes&&r.sizes.length
-            ? r.sizes.map(z=>z.size+' '+z.qty).join('  ') : '—')+'</span>'+
-          '<span class="ofq2"><b>'+n0(r.ordered)+'</b> ordered · <b>'+n0(r.delivered)+
-            '</b> in · <b>'+n0(r.left)+'</b> to come · ₹'+n0(r.rate)+'</span></div></div>';
-    }).join('')+'</div>'+
-    '<div class="acts" style="display:flex;gap:8px;margin-top:14px">'+
-      '<button onclick="closeSheet();paint()">Close</button>'+
-      '<button class="p" onclick="closeSheet();openSup(\''+rows[0].alias+'\')">The supplier</button></div>';
-};
+window.loadOrders=loadOrders;
 
+function poListView(){
+  const M=MBORDERS;
+  if(M.status==='idle'){ setTimeout(()=>loadOrders(),0); }
+  const head = backBtn('buy','Back to Purchase')+
+    '<div class="colhd">Orders raised in the portal</div>';
 
-/* ==================================================== the department report
-   A buyer is not an analyst. So this reads as a page rather than a grid: what
-   sold, where it sold, what is stuck, what to do — with the pictures beside the
-   figures. Sorting is there for the buyer who does want to dig. */
+  if(M.status==='error'){
+    return head+'<div class="livebad"><b>These could not be loaded.</b> '+
+      String(M.error||'').replace(/</g,'&lt;')+
+      ' <button onclick="loadOrders(true)">Try again</button></div>';
+  }
+  if(M.status!=='ok') return head+'<div class="livewait">Reading the orders&hellip;</div>';
+
+  const o=M.orders||[];
+  if(!o.length){
+    return head+'<span class="rnote">No orders have been raised yet. '+
+      'Purchase &rarr; Raise a purchase order.</span>';
+  }
+  const pending=o.filter(x=>!x.sheet.synced).length;
+  return head+
+    (pending?'<div class="livewait">'+n0(pending)+' order'+(pending===1?'':'s')+
+      ' saved but not yet in the Google Sheet. They are safe and can be retried.</div>':'')+
+    '<div class="rowlist">'+o.map(function(x){
+      return '<button class="row" onclick="alertBar(\'Order '+x.orderNo+'\')">'+
+        '<span class="rowt"><b>'+x.orderNo+'</b>'+
+          '<span>'+x.supplierAlias+' &middot; '+n0(x.totalQty)+' pieces &middot; '+
+          money(x.totalValue)+' &middot; '+pretty(x.orderDate)+
+          (x.wantedBy?' &middot; wanted '+pretty(x.wantedBy):'')+
+          ' &middot; '+(x.raisedByName||x.raisedBy)+
+          (x.sheet.synced?'':' &middot; not in sheet')+'</span></span>'+
+        '<span class="rowa">&rsaquo;</span></button>';
+    }).join('')+'</div>';
+}
+
 let dept='', dsort='sold';
 window.openDept=function(k){ dept=k; dsort='sold'; go('dept'); };
 window.setDSort=function(k){ dsort=k; paint(); };
@@ -3888,7 +4010,7 @@ function supView(){
       '<button class="tile sq3 lead" onclick="startPO(\''+k+'\');go(\'newpo\')">'+
         '<span class="ic">📷</span><span class="tt">Raise an order</span>'+
         '<span class="ts">on '+T(v.vendor).split(' ')[0]+'</span></button>'+
-      '<button class="tile sq3" onclick="setPolV(\''+k+'\');go(\'polist\')">'+
+      '<button class="tile sq3" onclick="go(\'polist\')">'+
         '<span class="ic">▤</span><span class="tt">Their orders</span>'+
         '<span class="ts">'+n0(o)+' pieces to come</span></button>'+
       '<button class="tile sq3" onclick="openMsgs(\'sup-in\')">'+
@@ -4215,47 +4337,61 @@ function rowItem(v,t,s,badge,tone){
 }
 
 function bookTab(){
-  const gs=groupSplit(), wide=bookWide();
-  const totQ=GROUPS.reduce((a,g)=>a+gs[g.k].q,0);
-  const totB=GROUPS.reduce((a,g)=>a+gs[g.k].bal,0);
-  return '<div class="tabhd"><h2>The book</h2><p>All '+n0(BOOK.length)+' suppliers, '+
-    n0(BOOK.reduce((a,x)=>a+x.ar,0))+' designs. Tap any category for its own report.</p></div>'+
+  const B = MBBOOK;
+  if(B.status==='idle'){ setTimeout(()=>loadBook(),0); }
+
+  const head =
+    '<div class="tabhd"><h2>The book</h2><p>Every supplier you have bought from, '+
+      'against what has sold and what is still in stock. '+liveRangeLabel()+'.</p></div>';
+
+  if(B.status==='error'){
+    return head+'<div class="livebad"><b>The book could not be loaded.</b> '+
+      String(B.error||'').replace(/</g,'&lt;')+
+      ' <button onclick="loadBook(true)">Try again</button></div>';
+  }
+  if(B.status!=='ok'){
+    return head+'<div class="livewait">Reading zRetailHQ0 for '+liveRangeLabel()+'&hellip;</div>';
+  }
+
+  const sup = B.suppliers||[], cats = B.categories||[];
+  const sold = sup.reduce((a,x)=>a+(x.soldQty||0),0);
+  const bal  = sup.reduce((a,x)=>a+(x.balanceQty||0),0);
+  const purch= sup.reduce((a,x)=>a+(x.purchasedQty||0),0);
+  const totCat = cats.reduce((a,x)=>a+(x.qty||0),0);
+
+  return head+
     '<div class="bookhd">'+
-      '<div><span>Sold</span><b>'+(wide?n0(totQ):'—')+'</b><u>'+perLabel()+'</u></div>'+
-      '<div><span>With us</span><b>'+n0(totB)+'</b><u>right now</u></div>'+
+      '<div><span>Sold</span><b>'+n0(sold)+'</b><u>'+liveRangeLabel()+'</u></div>'+
+      '<div><span>With us</span><b>'+n0(bal)+'</b><u>in stock now</u></div>'+
     '</div>'+
-    '<div class="catg">'+GROUPS.map(function(g){
-      const x=gs[g.k], share=totB?Math.round(x.bal/totB*100):0;
-      return '<button class="cat" onclick="openDept(\''+g.k+'\')">'+
-        '<span class="catn">'+g.lab+'</span>'+
-        '<span class="catq">'+(wide?n0(x.q):'—')+'</span>'+
-        '<span class="catm">'+n0(x.vendors)+' suppliers · '+n0(x.bal)+' left</span>'+
-        '<span class="catbar"><i style="width:'+share+'%"></i></span>'+
-        '<span class="catsh">'+share+'% of the stock</span></button>';
+    '<div class="colhd">'+n0(sup.length)+' suppliers &middot; '+n0(purch)+' pieces bought in this period</div>'+
+    (cats.length
+      ? '<div class="colhd">By category</div><div class="catg">'+cats.slice(0,12).map(function(c){
+          const share = totCat ? Math.round((c.qty/totCat)*100) : 0;
+          return '<button class="cat" onclick="setSQ(\''+String(c.key||'').replace(/'/g,"")+'\')">'+
+            '<span class="catn">'+(c.key||'—')+'</span>'+
+            '<span class="catq"><b>'+n0(c.qty)+'</b><u>sold</u></span>'+
+            '<span class="catb">'+share+'%</span></button>';
+        }).join('')+'</div>'
+      : '')+
+    '<div class="colhd">Suppliers, best selling first</div>'+
+    '<div class="rowlist">'+sup.slice(0,80).map(function(x){
+      const st = x.sellThroughPct;
+      return '<button class="row" onclick="startPO(\''+x.alias+'\');go(\'newpo\')">'+
+        '<span class="rowt"><b>'+x.alias+'</b>'+
+          '<span>'+n0(x.soldQty)+' sold &middot; '+n0(x.balanceQty)+' in stock'+
+          (st!=null?' &middot; '+st+'% through':'')+'</span></span>'+
+        '<span class="rowa">&rsaquo;</span></button>';
     }).join('')+'</div>'+
-    '<button class="row" onclick="go(\'watch\')">'+
-      '<span class="rowt"><b>The watch</b>'+
-      '<span>What the eye would miss across all '+n0(BOOK.length)+' suppliers</span></span>'+
-      '<span class="rowar">›</span></button>'+
-    '<button class="row" onclick="openDept(\'\')">'+
-      '<span class="rowt"><b>The whole book at once</b>'+
-      '<span>Every category together, with the year comparison</span></span>'+
-      '<span class="rowar">›</span></button>'+
-    (wide
-      ? '<p class="qfoot">Read off the generator’s manifest of '+pretty(BOOK_AT)+
-        '. The four categories add to the chain exactly — 392,032 sold and 252,186 with us. '+
-        'Sales value is one field away: the generator computes it per supplier, the manifest '+
-        'leaves it out.</p>'
-      : '<p class="qfoot"><b>'+perChip()+' is not held for the whole book.</b> The manifest carries '+
-        'seven-day, thirty-day and season figures for all '+n0(BOOK.length)+'; anything finer is '+
-        'three suppliers. Showing a third of the book as if it were all of it is the error that '+
-        'made Darshan read 70% of last year.</p>');
+    (sup.length>80 ? '<span class="rnote">Showing the top 80 by sales. Search to find any supplier.</span>' : '');
 }
 
-/* ---------------------------------------------------------------- search
-   A buyer knows the design number, not the menu path. */
+/* The search box in the header. Its declaration sat between bookTab and
+   searchResults and was lost when bookTab was rewritten - header() reads it on
+   every paint, so the whole screen threw "sq is not defined". */
 let sq='';
 window.setSQ=function(v){ sq=v; paint(); };
+
 function searchResults(){
   const q=sq.trim().toLowerCase(); if(q.length<2) return '';
   const sup=BOOK.filter(x=>x.v.toLowerCase().indexOf(q)>=0||x.a.toLowerCase().indexOf(q)>=0
@@ -4730,6 +4866,8 @@ function planTab(){
   const cl=cities();
   return '<div class="tabhd"><h2>The plan</h2><p>Your week, and every trip built from the '+
     'suppliers who actually need seeing rather than the ones you happened to book.</p></div>'+
+    sampleNotice('The diary and the trip plans are a worked example. A market visit is '+
+      'something a person enters, so it needs its own screen to add one')+
 
     '<div class="colhd">Next in your diary</div>'+
     '<ol class="diary">'+upcoming.slice(0,6).map(function(d){
